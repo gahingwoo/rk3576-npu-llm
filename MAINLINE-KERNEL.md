@@ -71,9 +71,12 @@ kiln-vision /opt/models/test.jpg
 kiln-chat
 ```
 
-## Wi-Fi note
+## Wi-Fi
 
-The ROCK 4D's onboard aic8800 wifi/bt is **out-of-tree** (not in mainline). Its
-DKMS module needs a cfg80211 fixup to build on 7.1 (`net_device` → `wireless_dev`
-in the station ops); until that lands, use ethernet or the patched aic8800 in
-`aic8800-patches/`.
+The ROCK 4D's onboard aic8800 wifi/bt is **out-of-tree** (not in mainline) and its
+stock driver — even radxa's latest 5.0 — does **not** build on 7.1 (Linux 7.1
+changed the cfg80211 station/key ops from `net_device` to `wireless_dev`). So Kiln
+carries the compat fix in `aic8800-patches/`, and `kiln-install.sh` builds the
+patched radxa 5.0 driver via DKMS for the mainline kernel so **wifi/bt keep
+working**. If that build ever fails (upstream moved), the installer warns and
+continues — use ethernet, and the fix is a PR to `radxa-pkg/aic8800`.

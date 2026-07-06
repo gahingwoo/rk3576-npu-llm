@@ -23,6 +23,8 @@ set -euo pipefail
 REPO="${KILN_REPO:-https://github.com/gahingwoo/kiln.git}"
 GH="${KILN_GH:-gahingwoo/kiln}"
 KTAG="${KILN_KERNEL_TAG:-kiln-mainline-kernel}"
+AIC_REPO="${KILN_AIC_REPO:-https://github.com/radxa-pkg/aic8800.git}"
+AIC_REF="${KILN_AIC_REF:-5.0+git20260123.5f7be68d-6}"   # the release Kiln's patch is verified against
 KILN_DIR="${KILN_DIR:-/opt/kiln}"
 PKG=kiln-rknpu; VER=0.9.8
 KREL="$(uname -r)"
@@ -74,6 +76,38 @@ wire_boot(){
 			echo 'fdtfile=rockchip/rk3576-rock-4d.dtb' | $SUDO tee -a /boot/armbianEnv.txt >/dev/null
 		fi
 	fi
+}
+
+# The ROCK 4D's onboard aic8800 wifi/bt is out-of-tree and its stock driver does
+# not build on 7.1 -- so moving to the mainline kernel drops wifi. Build the
+# Kiln-patched aic8800 (radxa 5.0 + aic8800-patches/) via DKMS for kernel $1 so
+# wifi/bt survive. Best-effort: warns and continues (use ethernet) if it can't.
+install_patched_aic8800(){
+	local k="$1" src pf pkg=aic8800-usb ver=5.0-kiln
+	command -v dkms >/dev/null 2>&1 || return 0
+	pf="$(ls "$KILN_DIR"/aic8800-patches/0001-*.patch 2>/dev/null | head -1)"
+	[ -f "$pf" ] || return 0
+	say "restoring wifi/bt: building the Kiln-patched aic8800 driver for $k ..."
+	# drop any aic8800 DKMS already registered (the stock one won't build on 7.1)
+	$SUDO dkms status 2>/dev/null | sed -E 's#[/,:]# #g' | awk '/aic8800/{print $1"/"$2}' | sort -u |
+	while read -r old; do [ -n "$old" ] && $SUDO dkms remove "$old" --all >/dev/null 2>&1 || true; done
+	src="$(mktemp -d)"
+	git clone --depth 1 --branch "$AIC_REF" "$AIC_REPO" "$src/a" >/dev/null 2>&1 \
+		|| git clone --depth 1 "$AIC_REPO" "$src/a" >/dev/null 2>&1 \
+		|| { say "  WARN: couldn't fetch aic8800 source; wifi stays down on $k (use ethernet)."; rm -rf "$src"; return 0; }
+	if ! ( cd "$src/a" && patch -p1 < "$pf" ) >/dev/null 2>&1; then
+		say "  WARN: aic8800 patch did not apply (upstream moved); wifi stays down on $k."; rm -rf "$src"; return 0
+	fi
+	$SUDO rm -rf "/usr/src/$pkg-$ver"; $SUDO mkdir -p "/usr/src/$pkg-$ver"
+	$SUDO cp -r "$src/a/src/USB" "/usr/src/$pkg-$ver/"
+	sed "s/#MODULE_VERSION#/$ver/g" "$src/a/debian/aic8800-usb-dkms.dkms" | $SUDO tee "/usr/src/$pkg-$ver/dkms.conf" >/dev/null
+	$SUDO dkms add "$pkg/$ver" >/dev/null 2>&1 || true
+	if $SUDO dkms build "$pkg/$ver" -k "$k" >/dev/null 2>&1 && $SUDO dkms install "$pkg/$ver" -k "$k" >/dev/null 2>&1; then
+		say "  aic8800 wifi/bt built and installed for $k."
+	else
+		say "  WARN: patched aic8800 failed to build for $k (debug: sudo dkms build $pkg/$ver -k $k). Wifi stays down; use ethernet."
+	fi
+	rm -rf "$src"
 }
 
 # --- 0. preflight -----------------------------------------------------------
@@ -157,6 +191,10 @@ $SUDO dkms install "$PKG/$VER"
 # Load rknpu at boot (loading a module needs root; the dtb's NPU node is up before
 # userspace, so a boot-time modprobe binds it and the render node is ready).
 echo rknpu | $SUDO tee /etc/modules-load.d/rknpu.conf >/dev/null
+
+# Restore onboard wifi/bt on the mainline kernel (the stock aic8800 doesn't build
+# on 7.1; Kiln's patch does). Best-effort -- the NPU install does not depend on it.
+install_patched_aic8800 "$KREL"
 
 # --- 5. NPU device-tree node -------------------------------------------------
 # Nothing to do: on the mainline kernel the vendor NPU node is compiled into the
