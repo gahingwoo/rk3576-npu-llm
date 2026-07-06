@@ -37,9 +37,14 @@ $SUDO apt-get install -y git build-essential dkms device-tree-compiler \
 # then the branch meta. We never touch your kernel without asking: the meta tracks
 # the LATEST edge build, which may be newer than the one you booted.
 if [ ! -d "/lib/modules/$KREL/build" ]; then
-	say "getting kernel headers for $KREL ..."
-	$SUDO apt-get install -y "linux-headers-$KREL"    >/dev/null 2>&1 || \
-	$SUDO apt-get install -y "linux-headers-$BRANCH"  >/dev/null 2>&1 || true
+	say "getting kernel headers matching $KREL (without changing your kernel) ..."
+	# Armbian versions linux-headers-<branch> by ARMBIAN release (e.g. 25.11.2),
+	# not by kernel version. The header package at the SAME version as your
+	# installed kernel image is the header set for your running kernel -- so pin to
+	# it and we get matching headers without upgrading the kernel.
+	IMGVER="$(dpkg-query -W -f='${Version}' "linux-image-$BRANCH" 2>/dev/null || true)"
+	[ -n "$IMGVER" ] && $SUDO apt-get install -y "linux-headers-$BRANCH=$IMGVER" >/dev/null 2>&1 || true
+	[ -d "/lib/modules/$KREL/build" ] || $SUDO apt-get install -y "linux-headers-$KREL" >/dev/null 2>&1 || true
 fi
 if [ ! -d "/lib/modules/$KREL/build" ]; then
 	HVER="$(ls -d /usr/src/linux-headers-*-"$BRANCH" 2>/dev/null | sort -V | tail -1 | sed 's|.*/linux-headers-||')"
