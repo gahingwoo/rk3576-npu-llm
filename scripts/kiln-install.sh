@@ -31,6 +31,28 @@ SUDO=""; [ "$(id -u)" -eq 0 ] || SUDO=sudo
 say(){ printf '\n\033[1;36m[kiln]\033[0m %s\n' "$*"; }
 die(){ printf '\n\033[1;31m[kiln] ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
+# Build every registered DKMS module against kernel release $1; remove the ones
+# that don't build (e.g. the aic8800 wifi driver doesn't build on 7.1). A module
+# that fails to build makes the linux-image postinst's 'dkms autoinstall' fail,
+# which leaves the kernel half-configured and blocks ALL apt. Pruning them keeps
+# the kernel installable and apt usable -- at the cost of that driver until it
+# supports the new kernel.
+prune_unbuildable_dkms(){
+	local k="$1" m v
+	command -v dkms >/dev/null 2>&1 || return 0
+	[ -d "/lib/modules/$k/build" ] || return 0
+	$SUDO dkms status 2>/dev/null | sed -E 's#[/,:]# #g' | awk '{print $1, $2}' | sort -u |
+	while read -r m v; do
+		[ -n "$m" ] && [ "$m" != "$PKG" ] || continue
+		$SUDO dkms status -m "$m" -v "$v" -k "$k" 2>/dev/null | grep -q installed && continue
+		if ! $SUDO dkms build "$m/$v" -k "$k" >/dev/null 2>&1; then
+			say "  DKMS $m/$v does not build on $k -- removing it"
+			say "  (a driver such as aic8800 wifi/bt may stop working until it supports this kernel; use ethernet)"
+			$SUDO dkms remove "$m/$v" --all >/dev/null 2>&1 || true
+		fi
+	done
+}
+
 # --- 0. preflight -----------------------------------------------------------
 say "Kiln installer — RK3576 NPU on Armbian"
 [ "$(uname -m)" = aarch64 ] || die "aarch64 only (found $(uname -m))"
@@ -39,6 +61,13 @@ grep -aqi rk3576 /proc/device-tree/compatible 2>/dev/null \
 	|| say "note: board does not report rk3576 in /proc/device-tree/compatible; continuing"
 
 # --- 1. prerequisites -------------------------------------------------------
+# Heal first: a kernel left half-configured by a DKMS module that won't build on
+# it (e.g. a prior interrupted run) blocks every apt call below. Clear it.
+if ! $SUDO dpkg --configure -a >/dev/null 2>&1; then
+	say "an unfinished package configuration is blocking apt (a DKMS module won't build) -- healing ..."
+	prune_unbuildable_dkms "$(ls -1 /lib/modules 2>/dev/null | sort -V | tail -1)"
+	$SUDO dpkg --configure -a || true
+fi
 say "installing prerequisites ..."
 $SUDO apt-get update -qq || true
 $SUDO apt-get install -y git build-essential dkms device-tree-compiler curl ca-certificates \
@@ -59,30 +88,16 @@ if ! on_patched_kernel; then
 	# dpkg-deb tar listing, which under 'set -o pipefail' aborts the script. sort -u
 	# consumes all input and a linux-image has exactly one /lib/modules/<release>.
 	KREL_NEW="$(dpkg-deb -c "$IMG" | grep -oE 'lib/modules/[^/]+' | sort -u | cut -d/ -f3)"
-	# Configure linux-HEADERS first: its postinst compiles the kernel-headers build
-	# scripts (fixdep/modpost/...). linux-image's postinst then runs 'dkms
-	# autoinstall', which builds out-of-tree modules (e.g. the aic8800 wifi driver)
-	# against that tree. If the image is configured first, DKMS builds against an
-	# unprepared headers tree, fails, and fails the whole dpkg run.
-	say "installing kernel $KREL_NEW (headers first, so DKMS builds against a ready tree) ..."
+	# Install linux-HEADERS first: its postinst compiles the kernel-headers build
+	# scripts (fixdep/modpost/...) that DKMS needs. Then prune any DKMS module that
+	# won't build on the new kernel (e.g. aic8800 wifi on 7.1) BEFORE installing the
+	# image -- otherwise the image postinst's 'dkms autoinstall' fails and leaves the
+	# kernel half-configured, which blocks apt.
+	say "installing kernel $KREL_NEW (headers first) ..."
 	$SUDO dpkg -i "$TMP"/linux-headers-*.deb || die "installing linux-headers failed."
-	if ! $SUDO dpkg -i "$TMP"/linux-dtb-*.deb "$TMP"/linux-image-*.deb; then
-		# The kernel still unpacked; only some third-party DKMS module that can't
-		# build on the new kernel failed the postinst. Verify our kernel landed,
-		# then drop such modules so the package configures and apt stays usable.
-		[ -e "/boot/vmlinuz-$KREL_NEW" ] || [ -d "/lib/modules/$KREL_NEW/kernel" ] \
-			|| die "the patched kernel $KREL_NEW did not install (see dpkg errors above)."
-		say "a DKMS module failed to build on $KREL_NEW; removing it so the kernel configures"
-		say "(a driver like aic8800 wifi may stop working until it supports 7.1) ..."
-		$SUDO dkms status 2>/dev/null | sed -E 's#[/,:]# #g' | awk '{print $1, $2}' | sort -u | \
-		while read -r m v; do
-			[ -n "$m" ] && [ "$m" != "$PKG" ] || continue
-			$SUDO dkms status -m "$m" -v "$v" -k "$KREL_NEW" 2>/dev/null | grep -q installed && continue
-			say "  removing DKMS $m/$v (does not build on $KREL_NEW)"
-			$SUDO dkms remove "$m/$v" --all >/dev/null 2>&1 || true
-		done
-		$SUDO dpkg --configure -a || die "kernel still won't configure; run 'sudo dpkg --configure -a'."
-	fi
+	prune_unbuildable_dkms "$KREL_NEW"
+	$SUDO dpkg -i "$TMP"/linux-dtb-*.deb "$TMP"/linux-image-*.deb \
+		|| die "installing the patched kernel failed (see dpkg errors above)."
 	# Hold, so 'apt upgrade' won't swap the patched kernel back for a stock one.
 	$SUDO apt-mark hold linux-image-edge-rockchip64 linux-dtb-edge-rockchip64 \
 		linux-headers-edge-rockchip64 >/dev/null 2>&1 || true
