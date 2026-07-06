@@ -21,25 +21,47 @@ cannot be shipped as a module.
 | file | subsystem | why Kiln needs it | required? |
 |---|---|---|---|
 | `0001-pmdomain-rockchip-npu-settle-delay.patch` | `pmdomain/rockchip` | 15 µs settle delay for the NPUTOP/NPU0/NPU1 domains between de-idle and QoS restore. **This is the fix for the inference freeze / `-110`.** Self-contained; no DT change. | **yes — the fatal one** |
-| `0002-pmdomain-rockchip-cycle-pd-resets.patch` | `pmdomain/rockchip` | Optional per-domain reset pulse on power-on for domains whose bus interface needs a reset edge. Only fires if the power-domain DT node carries `resets` (needs a matching DT change), so it is a no-op on stock Armbian DT. | optional |
-| `0003-iommu-rockchip-take-all-dt-clocks.patch` | `iommu/rockchip` | Take all DT clocks by index instead of the named `aclk`/`iface` pair, so the NPU MMU nodes' clocks are managed. Fixes the harmless `rk_iommu ... Failed to get clk 'aclk'` `-ENOENT`; the clocks are already on (enabled by the NPU node), so this is cosmetic for Kiln. | optional (cosmetic) |
+| `0002-pmdomain-rockchip-cycle-pd-resets.patch` | `pmdomain/rockchip` | Optional per-domain reset pulse on power-on for domains whose bus interface needs a reset edge. Only fires if the power-domain DT node carries `resets` (needs a matching DT change). | optional |
+| `0003-iommu-rockchip-take-all-dt-clocks.patch` | `iommu/rockchip` | **Driver-only** (split from its old DT hunk): take every DT clock via `devm_clk_bulk_get_all()` instead of the named `aclk`/`iface` pair, so the NPU MMU's extra CBUF/DSU gates run during `rk_iommu_resume` (mainline enables only aclk+iface → the MMU DTE write is silently dropped). Kiln's module also programs the DTE directly, so inference works without it, but this is the correct kernel-side fix. | recommended |
+| `0004-arm64-dts-rk3576-add-vendor-rknpu-node.patch` | `arm64: dts` | Adds the vendor-shaped `npu@27700000` + two v2 IOMMUs to mainline `rk3576.dtsi` and enables it on ROCK 4D with `vdd_npu_s0`. Mainline has **no** NPU compute node (its accel/rocket path uses a different `rknn_core` layout), so this is what the vendor `rknpu` driver binds — the in-tree equivalent of the Armbian DT overlay. | **yes for a mainline build** |
 
-Start with **0001 only**. It is the minimum that makes NPU inference work; 0002
-and 0003 address non-fatal / DT-dependent details.
+For a **mainline** build apply **0001 + 0003 + 0004** (0002 optional). For the
+Armbian build the DT node comes from the overlay instead, so only **0001** is
+strictly needed there.
 
 ## Provenance
 
-Authored by gahingwoo (`huhuvmb88`) for the RK3576 NPU bring-up, on top of the
-`linux-next` 20260527 snapshot (so they apply cleanly to Armbian **edge** 7.1,
-which shares that base — not to 6.19). They are **not upstream**: stock mainline
-/ stock Armbian of any version does not have them, which is why simply moving to
-a newer Armbian kernel does not help. The long-term fix is to land 0001 in
-mainline (and/or Armbian's kernel patch set) so a stock Armbian edge kernel runs
-the NPU with no rebuild.
+Authored by Jiaxing Hu (`huhuvmb88`) during the RK3576 NPU bring-up. Verified to
+apply to **mainline 7.1.3**: 0001 clean, 0003 clean (driver-only), 0004 clean and
+compiles into a valid `rk3576-rock-4d.dtb`. They also apply to Armbian **edge**
+7.1 (same base). They are **not upstream** — stock mainline / stock Armbian of any
+version lacks them, which is why moving to a newer kernel alone does not help.
+
+## Upstreaming status (honest — not yet submitted)
+
+These are carried here to make the NPU work today; they are **not** LKML-ready as
+written. Known review points before submission:
+
+- **0001** — the 15 µs is empirical (it mirrors the vendor kernel's NPUTOP
+  `delay_us`); a maintainer will want the delay tied to a documented NoC/settle
+  timing, not "the vendor does it", and may ask for it as a DT property rather
+  than hard-coded. The `udelay` sits in the genpd power path, so it must stay
+  short.
+- **0003** — the DT and driver changes are now split (this is the driver half;
+  the NPU MMU node with the full clock set lives in 0004). Reviewers will scrutinise
+  the `devm_clk_bulk_get_all()` `err == -ENOENT || err == 0` boundary.
+- **0002** — optional; needs a matching `dt-bindings` addition for the
+  power-domain `resets` and only fires when the DT provides them.
+- **0004** — board/SoC DT; would go via the Rockchip DT tree, separate from the
+  driver patches, and depends on the vendor `rknpu` binding being acceptable
+  upstream (mainline's own NPU path is the open `accel/rocket` driver).
+
+The long-term fix is to land 0001 (and 0003) in mainline so a **stock** kernel
+runs the NPU with no rebuild.
 
 ## Applying
 
-These are consumed by the Armbian kernel build (see `../ARMBIAN-KERNEL.md`),
-which drops them into the Armbian build framework's `userpatches/` and produces a
-patched `linux-image-*.deb`. They are ordinary `git format-patch` output and also
-apply with `patch -p1` against an Armbian edge kernel source tree.
+The mainline kernel build (see `../MAINLINE-KERNEL.md`) applies these with
+`patch -p1` (or `git am`) on a `linux-7.1.3` tree; the Armbian build
+(`../ARMBIAN-KERNEL.md`) drops 0001 into the framework's `userpatches/`. They are
+ordinary `git format-patch` output.
