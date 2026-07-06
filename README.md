@@ -47,11 +47,12 @@ Bring-up caveats (honest):
   portable by construction (no kernel patches — all fixes are in the module + a
   DT overlay) but not yet tested on an Armbian release.
 
-**Also wired up — image inference (the CNN control experiment):** a MobileNet /
-RKNN path (`librknnrt`) that classifies an image on the same NPU, to confirm the
-driver fix generalises from transformer matmul to convolution. `kiln-vision
-<image>` prints the top-5 ImageNet classes + inference time. You supply a
-converted `mobilenet_v2_for_rk3576.rknn`; see [`VISION.md`](VISION.md).
+**Also works — image inference (the CNN control experiment):** a MobileNet / RKNN
+path (`librknnrt`) classifies an image on the same NPU, confirming the driver fix
+generalises from transformer matmul to convolution. `kiln-vision <image>` runs
+MobileNetV2 and prints the top-5 ImageNet classes — **~6 ms / ~160 fps, correct
+labels** on the RK3576 NPU. See [`VISION.md`](VISION.md). (The `.rknn` must be
+version-matched to `librknnrt` — same model/runtime lock as RKLLM.)
 
 ## Build
 

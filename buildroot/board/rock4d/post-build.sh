@@ -76,9 +76,9 @@ mkdir -p "$TARGET_DIR/opt/models"
 [ -f "$KILN/model/test.jpg" ]            && install -m0644 "$KILN/model/test.jpg"            "$TARGET_DIR/opt/models/test.jpg"
 [ -f "$KILN/model/imagenet_labels.txt" ] && install -m0644 "$KILN/model/imagenet_labels.txt" "$TARGET_DIR/opt/models/imagenet_labels.txt"
 # MobileNet .rknn (small, ~6 MB) for the vision control experiment
-[ -f "$KILN/model/mobilenet_v2_for_rk3576.rknn" ] \
-	&& install -m0644 "$KILN/model/mobilenet_v2_for_rk3576.rknn" "$TARGET_DIR/opt/models/mobilenet_v2_for_rk3576.rknn" \
-	&& echo "[kiln] baked mobilenet_v2_for_rk3576.rknn into /opt/models/"
+[ -f "$KILN/model/mobilenetv2-12_rk3576.rknn" ] \
+	&& install -m0644 "$KILN/model/mobilenetv2-12_rk3576.rknn" "$TARGET_DIR/opt/models/mobilenetv2-12_rk3576.rknn" \
+	&& echo "[kiln] baked mobilenetv2-12_rk3576.rknn into /opt/models/"
 # LLM model (large, ~1.4 GB) only when KILN_BAKE_MODEL=1
 if [ "${KILN_BAKE_MODEL:-0}" = "1" ]; then
 	M="$KILN/model/Qwen2.5-1.5B-rk3576-w4a16.rkllm"

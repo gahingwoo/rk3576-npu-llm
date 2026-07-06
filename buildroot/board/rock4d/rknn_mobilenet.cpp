@@ -87,16 +87,33 @@ int main(int argc, char **argv)
 	in_attr.index = 0;
 	rknn_query(ctx, RKNN_QUERY_INPUT_ATTR, &in_attr, sizeof(in_attr));
 
-	int req_h, req_w;
+	/* Query the output attr too -- the reference examples always do, and the
+	 * runtime's want_float dequant path uses it. n_elems drives the class count. */
+	rknn_tensor_attr out_attr;
+	memset(&out_attr, 0, sizeof(out_attr));
+	out_attr.index = 0;
+	rknn_query(ctx, RKNN_QUERY_OUTPUT_ATTR, &out_attr, sizeof(out_attr));
+
+	int req_h, req_w, req_c;
 	if (in_attr.fmt == RKNN_TENSOR_NCHW) {      /* N C H W */
+		req_c = in_attr.dims[1];
 		req_h = in_attr.dims[2];
 		req_w = in_attr.dims[3];
 	} else {                                    /* N H W C */
 		req_h = in_attr.dims[1];
 		req_w = in_attr.dims[2];
+		req_c = in_attr.dims[3];
 	}
-	printf("model: %u in / %u out, input %dx%dx3\n",
-	       io_num.n_input, io_num.n_output, req_w, req_h);
+	printf("model: %u in / %u out, input %dx%dx%d fmt=%d n_dims=%u type=%d | out n_elems=%u dims=[%u %u %u %u]\n",
+	       io_num.n_input, io_num.n_output, req_w, req_h, req_c,
+	       in_attr.fmt, in_attr.n_dims, in_attr.type,
+	       out_attr.n_elems, out_attr.dims[0], out_attr.dims[1],
+	       out_attr.dims[2], out_attr.dims[3]);
+	if (req_c != 3) {
+		fprintf(stderr, "unexpected input channels %d (need 3)\n", req_c);
+		rknn_destroy(ctx);
+		return 1;
+	}
 
 	int iw, ih, ic;
 	unsigned char *img = stbi_load(argv[2], &iw, &ih, &ic, 3);   /* force RGB */
@@ -106,14 +123,24 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-	/* Nearest-neighbour resize to the model's input, NHWC uint8. rknn models
-	 * bake the mean/std normalisation in, so raw 0-255 RGB is what to feed. */
-	std::vector<uint8_t> in(req_w * req_h * 3);
+	/* Nearest-neighbour resize to the model's input, uint8, in the layout the
+	 * runtime advertises (RKNN image models present NHWC). rknn bakes the mean/std
+	 * normalisation in, so raw 0-255 RGB is what to feed.
+	 * NOTE: the runtime + model versions must match (like RKLLM's version-lock) --
+	 * a MobileNet .rknn converted with toolkit 2.1.0 threw an out-of-range in
+	 * rknn_inputs_set under librknnrt 2.3.0; a 2.3.0-converted ONNX model just works. */
+	int use_nchw = (in_attr.fmt == RKNN_TENSOR_NCHW);
+	std::vector<uint8_t> in(3 * req_h * req_w);
 	for (int y = 0; y < req_h; y++)
 		for (int x = 0; x < req_w; x++) {
 			int sx = x * iw / req_w, sy = y * ih / req_h;
-			for (int c = 0; c < 3; c++)
-				in[(y * req_w + x) * 3 + c] = img[(sy * iw + sx) * 3 + c];
+			for (int c = 0; c < 3; c++) {
+				uint8_t v = img[(sy * iw + sx) * 3 + c];
+				if (use_nchw)
+					in[c * req_h * req_w + y * req_w + x] = v;
+				else
+					in[(y * req_w + x) * 3 + c] = v;
+			}
 		}
 	stbi_image_free(img);
 
@@ -121,10 +148,15 @@ int main(int argc, char **argv)
 	memset(inputs, 0, sizeof(inputs));
 	inputs[0].index = 0;
 	inputs[0].type = RKNN_TENSOR_UINT8;
-	inputs[0].fmt = RKNN_TENSOR_NHWC;
+	inputs[0].fmt = use_nchw ? RKNN_TENSOR_NCHW : RKNN_TENSOR_NHWC;
 	inputs[0].size = in.size();
 	inputs[0].buf = in.data();
-	rknn_inputs_set(ctx, 1, inputs);
+	ret = rknn_inputs_set(ctx, 1, inputs);
+	if (ret < 0) {
+		fprintf(stderr, "rknn_inputs_set failed: %d\n", ret);
+		rknn_destroy(ctx);
+		return 1;
+	}
 
 	auto t0 = std::chrono::steady_clock::now();
 	ret = rknn_run(ctx, nullptr);
@@ -139,9 +171,15 @@ int main(int argc, char **argv)
 	rknn_output outputs[1];
 	memset(outputs, 0, sizeof(outputs));
 	outputs[0].want_float = 1;
-	rknn_outputs_get(ctx, 1, outputs, nullptr);
+	ret = rknn_outputs_get(ctx, 1, outputs, nullptr);
+	if (ret < 0) {
+		fprintf(stderr, "rknn_outputs_get failed: %d\n", ret);
+		rknn_destroy(ctx);
+		return 1;
+	}
 
-	int n = outputs[0].size / sizeof(float);
+	int n = out_attr.n_elems ? (int)out_attr.n_elems
+				 : (int)(outputs[0].size / sizeof(float));
 	float *scores = (float *)outputs[0].buf;
 	std::vector<int> idx(n);
 	for (int i = 0; i < n; i++)

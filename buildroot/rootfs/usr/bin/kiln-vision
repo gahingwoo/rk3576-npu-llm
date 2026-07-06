@@ -3,7 +3,7 @@
 # The CNN control experiment next to kiln-chat's RKLLM matmul path.
 # Usage: kiln-vision [image.jpg]
 export LD_LIBRARY_PATH=/usr/lib
-MODEL="${KILN_RKNN_MODEL:-/opt/models/mobilenet_v2_for_rk3576.rknn}"
+MODEL="${KILN_RKNN_MODEL:-/opt/models/mobilenetv2-12_rk3576.rknn}"
 LABELS="${KILN_RKNN_LABELS:-/opt/models/imagenet_labels.txt}"
 IMG="${1:-/opt/models/test.jpg}"
 
