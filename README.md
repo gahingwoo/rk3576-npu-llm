@@ -79,8 +79,15 @@ The module alone can be built against any mainline kernel tree:
 make KDIR=/path/to/your/kernel/build     # after fetch + apply-shims
 ```
 
-**On Armbian** (stock mainline kernel, no kernel rebuild): `./scripts/install-armbian.sh`
-does DKMS + the DT overlay + runtime. See [`ARMBIAN.md`](ARMBIAN.md).
+**On Armbian** (stock mainline kernel, no kernel rebuild) — one command:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/gahingwoo/kiln/main/scripts/kiln-install.sh | bash
+```
+
+It bootstraps the prereqs, builds the driver with DKMS (vermagic matches the
+running kernel), installs a self-contained NPU device-tree overlay, and installs
+the runtimes + demos. See [`ARMBIAN.md`](ARMBIAN.md).
 
 The DT node uses the **real** vendor RK3576 addresses (see `dts/`), not the
 guessed open-driver layout.

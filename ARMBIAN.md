@@ -25,29 +25,36 @@ was developed on.
 ## Prerequisites
 
 - Armbian aarch64 with a **mainline** kernel ≥ 6.13 that has RK3576 support
-  (Armbian "edge"/current for `rock-4d`). The base DT must expose the labels
-  `&rknn_core_0/1`, `&rknn_mmu_0/1`, `&cru`, `&power`, `&vdd_npu_s0` (mainline
-  `rk3576.dtsi` + `rk3576-rock-4d.dts` do).
-- `sudo apt install dkms device-tree-compiler git build-essential linux-headers-$(uname -r)`
-- A version-matched `librkllmrt` (Kiln pins **1.2.0**) and a `*-rk3576-w4a16.rkllm`
-  model converted with the matching toolkit.
+  (Armbian "edge"/current for `rock-4d`). Its base DT does **not** need NPU nodes —
+  the overlay adds them — but must export the symbols `cru`, `power`, `vdd_npu_s0`
+  (the ROCK 4D DT does; check `ls /proc/device-tree/__symbols__/`).
+- The kernel **headers** package for the running kernel. On Armbian it is named by
+  branch, not version: `sudo apt install linux-headers-$(uname -r | sed -E 's/^[0-9.]+-//')`
+  (e.g. `linux-headers-edge-rockchip64`), plus `dkms device-tree-compiler git build-essential`.
+- A version-matched `librkllmrt` (Kiln pins **1.2.0**) + a `*-rk3576-w4a16.rkllm`, and/or
+  a `librknnrt`-matched (**2.3.0**) `*_rk3576.rknn` for vision.
 
 ## One-shot install
 
 ```sh
-git clone https://github.com/gahingwoo/rk3576-npu-llm.git kiln && cd kiln
-./scripts/install-armbian.sh          # DKMS + overlay + runtime + demo
-# put your model into /opt/models and set MODEL= in /usr/bin/kiln-chat
+curl -fsSL https://raw.githubusercontent.com/gahingwoo/kiln/main/scripts/kiln-install.sh | bash
+# copy your models into /opt/models (a *-rk3576-w4a16.rkllm and/or a *_rk3576.rknn)
 sudo reboot
-kiln-chat
+kiln-vision /opt/models/test.jpg     # or: kiln-chat
 ```
+
+It bootstraps the prerequisites, builds the driver with DKMS (so the vermagic
+matches the running kernel), installs the overlay, and installs the runtimes +
+demos. Re-runnable.
 
 ## What the overlay does
 
-`dts/rk3576-rock-4d-kiln-npu.dtso` disables the open **rocket** NPU cores
-(`rknn_core_0/1`), **reuses** the base DT's `rknn_mmu_0/1` IOMMU nodes (same
-hardware), and adds the single vendor-shaped `npu@27700000` that the vendor
-`rknpu` driver binds. Loaded via `user_overlays=` in `/boot/armbianEnv.txt`.
+`dts/rk3576-rock-4d-kiln-npu.dtso` is **self-contained**: it adds the vendor-shaped
+`npu@27700000` plus its two v2 IOMMUs (`@27702000` / `@2770a000`) from scratch,
+referencing only `&cru`, `&power`, `&vdd_npu_s0`, with **numeric** clock/reset/power
+IDs so it builds with plain `dtc` (no dt-bindings headers). The prebuilt `.dtbo`
+ships in the repo; it's copied to `/boot/overlay-user/kiln-npu.dtbo` and enabled via
+`user_overlays=kiln-npu` in `/boot/armbianEnv.txt`.
 
 ## Verify
 

@@ -2,36 +2,23 @@
 /*
  * Kiln NPU overlay for Radxa ROCK 4D (RK3576) on a mainline / Armbian kernel.
  *
- * Turns the board's open "rocket" NPU (rknn_core_0/1) OFF and adds the single
- * vendor-shaped npu@27700000 that the out-of-tree vendor rknpu (v0.9.8) driver
- * binds, so librkllmrt / RKLLM can run LLMs on the NPU. It REUSES the base DT's
- * rknn_mmu_0/1 IOMMU nodes (same hardware, same clocks/power-domain as the
- * vendor MMUs) instead of declaring duplicates.
+ * Self-contained: adds the single vendor-shaped npu@27700000 plus its two v2
+ * IOMMUs from scratch, for kernels (like Armbian edge) whose base DT has the NPU
+ * SoC peripherals but NO driver-bindable NPU compute node. It references only
+ * &cru, &power and &vdd_npu_s0 -- symbols present in the ROCK 4D base DT -- and
+ * uses NUMERIC clock/reset/power IDs so it compiles with plain `dtc`, no
+ * dt-bindings headers needed:
+ *   clocks : ACLK_RKNN0=229 ACLK_RKNN1=230 HCLK_RKNN_ROOT=231 CLK_RKNN_DSU0=232
+ *            PCLK_NPUTOP_ROOT=233 ACLK_RKNN_CBUF=240 HCLK_RKNN_CBUF=244
+ *   resets : SRST_A_RKNN0=204 SRST_A_RKNN1=207 SRST_A_RKNN_CBUF=218 SRST_H_RKNN_CBUF=227
+ *   power  : RK3576_PD_NPU0=2 RK3576_PD_NPU1=3    irq: GIC_SPI=0 LEVEL_HIGH=4
  *
- * Build:  dtc -@ -I dts -O dtb -o rk3576-rock-4d-kiln-npu.dtbo \
- *              rk3576-rock-4d-kiln-npu.dtso    (cpp-preprocessed for the headers)
- * Armbian: copy the .dtbo to /boot/dtb/rockchip/overlay/ (or /boot/overlay-user/)
- *          and add its name to `user_overlays=` in /boot/armbianEnv.txt.
- *
- * Requires: the base DT to expose the labels &rknn_core_0/1, &rknn_mmu_0/1,
- * &cru, &power, &vdd_npu_s0 (mainline rk3576.dtsi + rk3576-rock-4d.dts do).
+ * Build:  dtc -@ -I dts -O dtb -o rk3576-rock-4d-kiln-npu.dtbo rk3576-rock-4d-kiln-npu.dtso
+ * (the standalone "reg has invalid length" / addr-size warnings are cosmetic --
+ * reg is interpreted against the base /soc's #address/#size-cells at apply time.)
  */
 /dts-v1/;
 /plugin/;
-
-#include <dt-bindings/clock/rockchip,rk3576-cru.h>
-#include <dt-bindings/interrupt-controller/arm-gic.h>
-#include <dt-bindings/interrupt-controller/irq.h>
-#include <dt-bindings/power/rockchip,rk3576-power.h>
-#include <dt-bindings/reset/rockchip,rk3576-cru.h>
-
-/* Turn the open rocket NPU cores off; the vendor rknpu drives this hardware. */
-&rknn_core_0 { status = "disabled"; };
-&rknn_core_1 { status = "disabled"; };
-
-/* Reuse the base MMU nodes as the vendor NPU's two IOMMUs (one per core). */
-&rknn_mmu_0 { status = "okay"; };
-&rknn_mmu_1 { status = "okay"; };
 
 &{/soc} {
 	npu_opp_table_kiln: npu-opp-table-kiln {
@@ -48,26 +35,43 @@
 		compatible = "rockchip,rk3576-rknpu";
 		reg = <0x0 0x27700000 0x0 0x8000>,
 		      <0x0 0x27708000 0x0 0x8000>;
-		interrupts = <GIC_SPI 247 IRQ_TYPE_LEVEL_HIGH>,
-			     <GIC_SPI 248 IRQ_TYPE_LEVEL_HIGH>;
+		interrupts = <0 247 4>, <0 248 4>;
 		interrupt-names = "npu0_irq", "npu1_irq";
-		clocks = <&cru CLK_RKNN_DSU0>, <&cru ACLK_RKNN0>,
-			 <&cru ACLK_RKNN1>, <&cru HCLK_RKNN_ROOT>,
-			 <&cru ACLK_RKNN_CBUF>, <&cru HCLK_RKNN_CBUF>,
-			 <&cru PCLK_NPUTOP_ROOT>;
+		clocks = <&cru 232>, <&cru 229>, <&cru 230>, <&cru 231>,
+			 <&cru 240>, <&cru 244>, <&cru 233>;
 		clock-names = "clk_npu", "aclk0", "aclk1", "hclk_root",
 			      "aclk_cbuf", "hclk_cbuf", "pclk";
-		resets = <&cru SRST_A_RKNN0>, <&cru SRST_A_RKNN1>,
-			 <&cru SRST_A_RKNN_CBUF>, <&cru SRST_H_RKNN_CBUF>;
-		reset-names = "srst_a0", "srst_a1",
-			      "srst_a_cbuf", "srst_h_cbuf";
-		power-domains = <&power RK3576_PD_NPU0>, <&power RK3576_PD_NPU1>;
+		resets = <&cru 204>, <&cru 207>, <&cru 218>, <&cru 227>;
+		reset-names = "srst_a0", "srst_a1", "srst_a_cbuf", "srst_h_cbuf";
+		power-domains = <&power 2>, <&power 3>;
 		power-domain-names = "npu0", "npu1";
 		operating-points-v2 = <&npu_opp_table_kiln>;
-		iommus = <&rknn_mmu_0>, <&rknn_mmu_1>;
+		iommus = <&rknpu_mmu_0>, <&rknpu_mmu_1>;
 		npu-supply = <&vdd_npu_s0>;
 		#cooling-cells = <2>;
 		dynamic-power-coefficient = <2570>;
+		status = "okay";
+	};
+
+	rknpu_mmu_0: iommu@27702000 {
+		compatible = "rockchip,rk3576-iommu", "rockchip,rk3568-iommu";
+		reg = <0x0 0x27702000 0x0 0x100>,
+		      <0x0 0x27702100 0x0 0x100>;
+		interrupts = <0 247 4>;
+		clocks = <&cru 229>, <&cru 231>, <&cru 232>, <&cru 240>, <&cru 244>;
+		#iommu-cells = <0>;
+		power-domains = <&power 2>;
+		status = "okay";
+	};
+
+	rknpu_mmu_1: iommu@2770a000 {
+		compatible = "rockchip,rk3576-iommu", "rockchip,rk3568-iommu";
+		reg = <0x0 0x2770a000 0x0 0x100>,
+		      <0x0 0x2770a100 0x0 0x100>;
+		interrupts = <0 248 4>;
+		clocks = <&cru 230>, <&cru 231>, <&cru 232>, <&cru 240>, <&cru 244>;
+		#iommu-cells = <0>;
+		power-domains = <&power 3>;
 		status = "okay";
 	};
 };
