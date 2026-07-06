@@ -3,25 +3,26 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/gahingwoo/kiln/main/scripts/kiln-install.sh | bash
 #
-# Two phases (it tells you when to reboot between them):
+# Runs on Armbian userspace with a Kiln MAINLINE kernel. Two phases (it tells you
+# when to reboot between them):
 #
-#   PHASE 1 — installs the Kiln-PATCHED Armbian kernel. The RK3576 NPU power
-#     domain needs a settle-delay fix in pmdomain/rockchip that must be COMPILED
-#     INTO the kernel (the out-of-tree module and the DT overlay cannot supply
-#     it); on a stock Armbian kernel the NPU SError-freezes on the first
-#     inference. The patched kernel is prebuilt by CI and published as a release.
-#     See kernel-patches/ and ARMBIAN-KERNEL.md.
+#   PHASE 1 — installs the Kiln mainline 7.1.3 kernel (pure mainline + a small
+#     pm-domain settle-delay fix that must be COMPILED INTO the kernel; the
+#     out-of-tree module can't supply it, and a stock kernel SError-freezes the
+#     NPU on the first inference). Prebuilt by CI, published as a release; the NPU
+#     node is baked into its dtb. It wires Armbian's u-boot to boot it.
+#     See kernel-patches/ and MAINLINE-KERNEL.md.
 #
-#   PHASE 2 — after you reboot into the patched kernel: builds the vendor rknpu
-#     driver (DKMS), installs the NPU device-tree overlay, the RKLLM/RKNN
-#     runtimes, and the kiln-chat / kiln-vision demos.
+#   PHASE 2 — after you reboot into that kernel: builds the vendor rknpu driver
+#     (DKMS) and installs the RKLLM/RKNN runtimes and the kiln-chat / kiln-vision
+#     demos. No DT overlay -- the NPU node is already in the dtb.
 #
 # You supply the model files (a *-rk3576-w4a16.rkllm and/or a *_rk3576.rknn).
 set -euo pipefail
 
 REPO="${KILN_REPO:-https://github.com/gahingwoo/kiln.git}"
 GH="${KILN_GH:-gahingwoo/kiln}"
-KTAG="${KILN_KERNEL_TAG:-armbian-npu-kernel-edge}"
+KTAG="${KILN_KERNEL_TAG:-kiln-mainline-kernel}"
 KILN_DIR="${KILN_DIR:-/opt/kiln}"
 PKG=kiln-rknpu; VER=0.9.8
 KREL="$(uname -r)"
@@ -53,6 +54,28 @@ prune_unbuildable_dkms(){
 	done
 }
 
+# Wire Armbian's u-boot to a mainline kernel (a bindeb-pkg .deb installs vmlinuz +
+# modules + dtbs + an initrd.img but does NOT create the u-boot uInitrd, the
+# /boot/Image link, or point armbianEnv at the dtb -- do that here, idempotently).
+wire_boot(){
+	local k="$1" dtb
+	if [ -f "/boot/initrd.img-$k" ] && command -v mkimage >/dev/null 2>&1; then
+		$SUDO mkimage -A arm64 -O linux -T ramdisk -C gzip -n uInitrd \
+			-d "/boot/initrd.img-$k" "/boot/uInitrd-$k" >/dev/null 2>&1 || true
+		$SUDO ln -sf "uInitrd-$k" /boot/uInitrd
+	fi
+	[ -e "/boot/vmlinuz-$k" ] && $SUDO ln -sf "vmlinuz-$k" /boot/Image
+	dtb="$(find "/usr/lib/linux-image-$k" /boot -name 'rk3576-rock-4d.dtb' 2>/dev/null | head -1)"
+	if [ -n "$dtb" ]; then
+		$SUDO install -Dm0644 "$dtb" /boot/dtb/rockchip/rk3576-rock-4d.dtb
+		if grep -q '^fdtfile=' /boot/armbianEnv.txt; then
+			$SUDO sed -i 's#^fdtfile=.*#fdtfile=rockchip/rk3576-rock-4d.dtb#' /boot/armbianEnv.txt
+		else
+			echo 'fdtfile=rockchip/rk3576-rock-4d.dtb' | $SUDO tee -a /boot/armbianEnv.txt >/dev/null
+		fi
+	fi
+}
+
 # --- 0. preflight -----------------------------------------------------------
 say "Kiln installer — RK3576 NPU on Armbian"
 [ "$(uname -m)" = aarch64 ] || die "aarch64 only (found $(uname -m))"
@@ -70,42 +93,39 @@ if ! $SUDO dpkg --configure -a >/dev/null 2>&1; then
 fi
 say "installing prerequisites ..."
 $SUDO apt-get update -qq || true
-$SUDO apt-get install -y git build-essential dkms device-tree-compiler curl ca-certificates \
+$SUDO apt-get install -y git build-essential dkms device-tree-compiler curl ca-certificates u-boot-tools \
 	|| die "apt failed installing prerequisites."
 
 # --- 2. KERNEL PHASE (install the patched kernel once, then reboot) ----------
 on_patched_kernel(){ [ -f "$MARKER" ] && [ "$KREL" = "$(cat "$MARKER" 2>/dev/null)" ]; }
 
 if ! on_patched_kernel; then
-	say "installing the Kiln-patched Armbian kernel (NPU pm-domain fix) from the '$KTAG' release ..."
+	say "installing the Kiln mainline NPU kernel from the '$KTAG' release ..."
 	TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 	( cd "$TMP" && curl -fsSL "https://api.github.com/repos/$GH/releases/tags/$KTAG" \
 		| grep -o 'https://[^"]*\.deb' | xargs -n1 -r curl -fLO ) \
-		|| die "could not download the patched kernel .debs from the '$KTAG' release."
+		|| die "could not download the mainline kernel .debs from the '$KTAG' release."
 	IMG="$(ls "$TMP"/linux-image-*.deb 2>/dev/null | head -1)"
 	[ -f "$IMG" ] || die "no linux-image .deb in the '$KTAG' release (is the CI build published?)."
-	# NB: no 'head' in this pipe -- it would close the pipe early and SIGPIPE the
-	# dpkg-deb tar listing, which under 'set -o pipefail' aborts the script. sort -u
-	# consumes all input and a linux-image has exactly one /lib/modules/<release>.
+	# no 'head' in this pipe (it would SIGPIPE dpkg-deb under pipefail); a
+	# linux-image has exactly one /lib/modules/<release>.
 	KREL_NEW="$(dpkg-deb -c "$IMG" | grep -oE 'lib/modules/[^/]+' | sort -u | cut -d/ -f3)"
-	# Install linux-HEADERS first: its postinst compiles the kernel-headers build
-	# scripts (fixdep/modpost/...) that DKMS needs. Then prune any DKMS module that
-	# won't build on the new kernel (e.g. aic8800 wifi on 7.1) BEFORE installing the
-	# image -- otherwise the image postinst's 'dkms autoinstall' fails and leaves the
-	# kernel half-configured, which blocks apt.
-	say "installing kernel $KREL_NEW (headers first) ..."
+	# Headers first: their postinst prepares the build tree DKMS needs. Then prune
+	# any DKMS module that won't build on the new kernel (e.g. aic8800 wifi on 7.1)
+	# BEFORE the image, or the image postinst's 'dkms autoinstall' fails and leaves
+	# the kernel half-configured (which blocks apt). A bindeb-pkg build has no
+	# separate linux-dtb package -- the dtbs ship inside linux-image.
+	say "installing mainline kernel $KREL_NEW (headers first) ..."
 	$SUDO dpkg -i "$TMP"/linux-headers-*.deb || die "installing linux-headers failed."
 	prune_unbuildable_dkms "$KREL_NEW"
-	$SUDO dpkg -i "$TMP"/linux-dtb-*.deb "$TMP"/linux-image-*.deb \
-		|| die "installing the patched kernel failed (see dpkg errors above)."
-	# Hold, so 'apt upgrade' won't swap the patched kernel back for a stock one.
-	$SUDO apt-mark hold linux-image-edge-rockchip64 linux-dtb-edge-rockchip64 \
-		linux-headers-edge-rockchip64 >/dev/null 2>&1 || true
+	$SUDO dpkg -i "$TMP"/linux-image-*.deb || die "installing the kernel failed (see dpkg errors above)."
+	wire_boot "$KREL_NEW"     # point Armbian's u-boot at the mainline kernel + dtb
+	$SUDO apt-mark hold "linux-image-$KREL_NEW" "linux-headers-$KREL_NEW" >/dev/null 2>&1 || true
 	$SUDO mkdir -p /etc/kiln; echo "$KREL_NEW" | $SUDO tee "$MARKER" >/dev/null
 	cat <<EOF
 
-[kiln] Patched kernel $KREL_NEW installed and held.
-       REBOOT into it, then run this installer again to finish:
+[kiln] Mainline NPU kernel $KREL_NEW installed. REBOOT into it, then run this
+       installer again to finish (rknpu module + runtimes + demos):
 
            sudo reboot
            curl -fsSL https://raw.githubusercontent.com/$GH/main/scripts/kiln-install.sh | bash
@@ -134,21 +154,15 @@ $SUDO dkms remove "$PKG/$VER" --all >/dev/null 2>&1 || true
 $SUDO dkms add "/usr/src/$PKG-$VER"
 $SUDO dkms build "$PKG/$VER"
 $SUDO dkms install "$PKG/$VER"
-# Load rknpu at boot (loading a module needs root; the overlay's NPU node is up
-# before userspace, so a boot-time modprobe binds it and the render node is ready).
+# Load rknpu at boot (loading a module needs root; the dtb's NPU node is up before
+# userspace, so a boot-time modprobe binds it and the render node is ready).
 echo rknpu | $SUDO tee /etc/modules-load.d/rknpu.conf >/dev/null
 
-# --- 5. NPU device-tree overlay (self-contained; symbols resolved at boot) ---
-say "installing the NPU overlay -> /boot/overlay-user/kiln-npu.dtbo ..."
-DTBO="dts/rk3576-rock-4d-kiln-npu.dtbo"
-[ -f "$DTBO" ] || dtc -@ -I dts -O dtb -o "$DTBO" dts/rk3576-rock-4d-kiln-npu.dtso 2>/dev/null
-$SUDO mkdir -p /boot/overlay-user
-$SUDO cp "$DTBO" /boot/overlay-user/kiln-npu.dtbo
-if grep -q '^user_overlays=' /boot/armbianEnv.txt; then
-	grep -qw 'kiln-npu' /boot/armbianEnv.txt || $SUDO sed -i '/^user_overlays=/ s/$/ kiln-npu/' /boot/armbianEnv.txt
-else
-	echo 'user_overlays=kiln-npu' | $SUDO tee -a /boot/armbianEnv.txt >/dev/null
-fi
+# --- 5. NPU device-tree node -------------------------------------------------
+# Nothing to do: on the mainline kernel the vendor NPU node is compiled into the
+# dtb (kernel-patches/0004), so there is no overlay to install. wire_boot()
+# already put that dtb where u-boot loads it.
+say "NPU node is built into the mainline dtb (no overlay needed)."
 
 # --- 6. runtimes + demos (native aarch64 build) + vision assets --------------
 say "fetching runtimes and building the demos ..."
@@ -181,7 +195,7 @@ done
 $SUDO depmod -a "$KREL" || true
 cat <<EOF
 
-[kiln] Installed on the patched kernel. REBOOT to apply the NPU overlay + load rknpu:
+[kiln] Installed on the mainline NPU kernel. REBOOT to load rknpu against the NPU node:
 
     sudo reboot
 
