@@ -1,0 +1,116 @@
+From: Jiaxing Hu <huhuvmb88@outlook.com>
+Date: Mon, 6 Jul 2026 00:00:00 +0000
+Subject: [PATCH] arm64: dts: rockchip: rk3576: add vendor rknpu NPU node
+
+Mainline rk3576.dtsi has no NPU compute node (mainline's accel/rocket path
+uses a different, rknn_core layout). Add the vendor-shaped npu@27700000 plus
+its two v2 IOMMUs for the out-of-tree rknpu (v0.9.8) driver, disabled by
+default, and enable it on the Radxa ROCK 4D with its vdd_npu_s0 supply.
+
+clk_npu is the NPU DSU clock, owned by BL31 firmware, so it is taken through
+&scmi_clk at the firmware SCMI index 238 (not CRU CLK_RKNN_DSU0) -- otherwise
+the NPU power domain never settles and probe fails with -110. Compiles into a
+valid rk3576-rock-4d.dtb on mainline 7.1.3 (all clock/reset/power/scmi phandles
+resolve).
+
+Signed-off-by: Jiaxing Hu <huhuvmb88@outlook.com>
+---
+--- a/arch/arm64/boot/dts/rockchip/rk3576.dtsi
++++ b/arch/arm64/boot/dts/rockchip/rk3576.dtsi
+@@ -858,6 +858,77 @@
+ 			reg = <0x0 0x26018000 0x0 0x2000>;
+ 		};
+ 
++		/*
++		 * Kiln: vendor-shaped RK3576 NPU for the out-of-tree rknpu (v0.9.8)
++		 * driver. Mainline has no NPU compute node (its accel/rocket path uses a
++		 * different, rknn_core layout), so Kiln adds this one. clk_npu is the DSU
++		 * clock, owned by BL31 firmware: it MUST come through &scmi_clk at the
++		 * firmware SCMI index 238 (SCMI_CLK_RKNN_DSU0), not CRU CLK_RKNN_DSU0,
++		 * or the NPU power domain never settles (probe fails -110). Disabled here;
++		 * a board enables it and adds npu-supply.
++		 */
++		rknpu: npu@27700000 {
++			compatible = "rockchip,rk3576-rknpu";
++			reg = <0x0 0x27700000 0x0 0x8000>,
++			      <0x0 0x27708000 0x0 0x8000>;
++			interrupts = <GIC_SPI 247 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 248 IRQ_TYPE_LEVEL_HIGH>;
++			interrupt-names = "npu0_irq", "npu1_irq";
++			clocks = <&scmi_clk 238>, <&cru ACLK_RKNN0>,
++				 <&cru ACLK_RKNN1>, <&cru HCLK_RKNN_ROOT>,
++				 <&cru ACLK_RKNN_CBUF>, <&cru HCLK_RKNN_CBUF>;
++			clock-names = "clk_npu", "aclk0", "aclk1", "hclk_root",
++				      "aclk_cbuf", "hclk_cbuf";
++			assigned-clocks = <&cru CLK_RKNN_DSU0>;
++			assigned-clock-rates = <198000000>;
++			resets = <&cru SRST_A_RKNN0>, <&cru SRST_A_RKNN1>,
++				 <&cru SRST_A_RKNN_CBUF>, <&cru SRST_H_RKNN_CBUF>;
++			reset-names = "srst_a0", "srst_a1", "srst_a_cbuf", "srst_h_cbuf";
++			power-domains = <&power RK3576_PD_NPU0>, <&power RK3576_PD_NPU1>;
++			power-domain-names = "npu0", "npu1";
++			operating-points-v2 = <&npu_opp_table>;
++			iommus = <&rknpu_mmu_0>, <&rknpu_mmu_1>;
++			#cooling-cells = <2>;
++			dynamic-power-coefficient = <2570>;
++			status = "disabled";
++
++			npu_opp_table: opp-table {
++				compatible = "operating-points-v2";
++				opp-300000000 { opp-hz = /bits/ 64 <300000000>; opp-microvolt = <725000>; };
++				opp-400000000 { opp-hz = /bits/ 64 <400000000>; opp-microvolt = <725000>; };
++				opp-500000000 { opp-hz = /bits/ 64 <500000000>; opp-microvolt = <725000>; };
++				opp-600000000 { opp-hz = /bits/ 64 <600000000>; opp-microvolt = <725000>; };
++				opp-700000000 { opp-hz = /bits/ 64 <700000000>; opp-microvolt = <725000>; };
++				opp-800000000 { opp-hz = /bits/ 64 <800000000>; opp-microvolt = <800000>; };
++			};
++		};
++
++		rknpu_mmu_0: iommu@27702000 {
++			compatible = "rockchip,rk3576-iommu", "rockchip,rk3568-iommu";
++			reg = <0x0 0x27702000 0x0 0x100>,
++			      <0x0 0x27702100 0x0 0x100>;
++			interrupts = <GIC_SPI 247 IRQ_TYPE_LEVEL_HIGH>;
++			clocks = <&cru ACLK_RKNN0>, <&cru HCLK_RKNN_ROOT>,
++				 <&cru CLK_RKNN_DSU0>, <&cru ACLK_RKNN_CBUF>,
++				 <&cru HCLK_RKNN_CBUF>;
++			#iommu-cells = <0>;
++			power-domains = <&power RK3576_PD_NPU0>;
++			status = "disabled";
++		};
++
++		rknpu_mmu_1: iommu@2770a000 {
++			compatible = "rockchip,rk3576-iommu", "rockchip,rk3568-iommu";
++			reg = <0x0 0x2770a000 0x0 0x100>,
++			      <0x0 0x2770a100 0x0 0x100>;
++			interrupts = <GIC_SPI 248 IRQ_TYPE_LEVEL_HIGH>;
++			clocks = <&cru ACLK_RKNN1>, <&cru HCLK_RKNN_ROOT>,
++				 <&cru CLK_RKNN_DSU0>, <&cru ACLK_RKNN_CBUF>,
++				 <&cru HCLK_RKNN_CBUF>;
++			#iommu-cells = <0>;
++			power-domains = <&power RK3576_PD_NPU1>;
++			status = "disabled";
++		};
++
+ 		vo0_grf: syscon@2601a000 {
+ 			compatible = "rockchip,rk3576-vo0-grf", "syscon";
+ 			reg = <0x0 0x2601a000 0x0 0x2000>;
+--- a/arch/arm64/boot/dts/rockchip/rk3576-rock-4d.dts
++++ b/arch/arm64/boot/dts/rockchip/rk3576-rock-4d.dts
+@@ -859,3 +859,16 @@
+ 		remote-endpoint = <&hdmi_in_vp0>;
+ 	};
+ };
++
++&rknpu {
++	npu-supply = <&vdd_npu_s0>;
++	status = "okay";
++};
++
++&rknpu_mmu_0 {
++	status = "okay";
++};
++
++&rknpu_mmu_1 {
++	status = "okay";
++};
