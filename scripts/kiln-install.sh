@@ -78,6 +78,10 @@ fi
 say "fetching Kiln into $KILN_DIR ..."
 if [ -d "$KILN_DIR/.git" ]; then $SUDO git -C "$KILN_DIR" pull --ff-only || true
 else $SUDO rm -rf "$KILN_DIR"; $SUDO git clone --depth 1 "$REPO" "$KILN_DIR"; fi
+# We cloned as root but the rest (fetch runtimes/assets, g++ demos) runs as you and
+# writes back into the repo (buildroot/dl, model/). Hand the tree to the caller so
+# those writes don't hit "Permission denied".
+$SUDO chown -R "$(id -u):$(id -g)" "$KILN_DIR"
 cd "$KILN_DIR"
 
 # --- 3. driver via DKMS (builds against the running kernel -> vermagic matches)
