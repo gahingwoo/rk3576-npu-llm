@@ -1,90 +1,93 @@
 #!/usr/bin/env bash
-# Kiln one-click installer — LLMs + vision on the RK3576 NPU, on Armbian (mainline).
+# Kiln one-click installer — LLMs + vision on the RK3576 NPU, on Armbian.
 #
 #   curl -fsSL https://raw.githubusercontent.com/gahingwoo/kiln/main/scripts/kiln-install.sh | bash
 #
-# Builds the vendor rknpu driver against the RUNNING Armbian kernel (DKMS, so the
-# vermagic always matches), installs a self-contained NPU device-tree overlay
-# (Armbian's mainline DT has the NPU peripherals but no bindable compute node),
-# and installs the RKLLM + RKNN runtimes and the kiln-chat / kiln-vision demos.
+# Two phases (it tells you when to reboot between them):
+#
+#   PHASE 1 — installs the Kiln-PATCHED Armbian kernel. The RK3576 NPU power
+#     domain needs a settle-delay fix in pmdomain/rockchip that must be COMPILED
+#     INTO the kernel (the out-of-tree module and the DT overlay cannot supply
+#     it); on a stock Armbian kernel the NPU SError-freezes on the first
+#     inference. The patched kernel is prebuilt by CI and published as a release.
+#     See kernel-patches/ and ARMBIAN-KERNEL.md.
+#
+#   PHASE 2 — after you reboot into the patched kernel: builds the vendor rknpu
+#     driver (DKMS), installs the NPU device-tree overlay, the RKLLM/RKNN
+#     runtimes, and the kiln-chat / kiln-vision demos.
+#
 # You supply the model files (a *-rk3576-w4a16.rkllm and/or a *_rk3576.rknn).
 set -euo pipefail
 
 REPO="${KILN_REPO:-https://github.com/gahingwoo/kiln.git}"
+GH="${KILN_GH:-gahingwoo/kiln}"
+KTAG="${KILN_KERNEL_TAG:-armbian-npu-kernel-edge}"
 KILN_DIR="${KILN_DIR:-/opt/kiln}"
 PKG=kiln-rknpu; VER=0.9.8
 KREL="$(uname -r)"
+MARKER=/etc/kiln/patched-kernel
 SUDO=""; [ "$(id -u)" -eq 0 ] || SUDO=sudo
 
 say(){ printf '\n\033[1;36m[kiln]\033[0m %s\n' "$*"; }
 die(){ printf '\n\033[1;31m[kiln] ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
 # --- 0. preflight -----------------------------------------------------------
-say "Kiln installer — RK3576 NPU on a mainline Armbian kernel"
+say "Kiln installer — RK3576 NPU on Armbian"
 [ "$(uname -m)" = aarch64 ] || die "aarch64 only (found $(uname -m))"
+[ -f /boot/armbianEnv.txt ] || die "no /boot/armbianEnv.txt — this installer targets Armbian"
 grep -aqi rk3576 /proc/device-tree/compatible 2>/dev/null \
 	|| say "note: board does not report rk3576 in /proc/device-tree/compatible; continuing"
-[ -f /boot/armbianEnv.txt ] || die "no /boot/armbianEnv.txt — this installer targets Armbian"
 
-# --- 1. prerequisites (incl. the Armbian header package for THIS kernel) -----
-BRANCH="$(printf '%s' "$KREL" | sed -E 's/^[0-9.]+-//')"     # 6.19.5-edge-rockchip64 -> edge-rockchip64
-say "installing build prerequisites ..."
+# --- 1. prerequisites -------------------------------------------------------
+say "installing prerequisites ..."
 $SUDO apt-get update -qq || true
-$SUDO apt-get install -y git build-essential dkms device-tree-compiler \
-	|| die "apt failed installing build prerequisites."
+$SUDO apt-get install -y git build-essential dkms device-tree-compiler curl ca-certificates \
+	|| die "apt failed installing prerequisites."
 
-# Kernel headers MATCHING THE RUNNING kernel. Try the exact-version package first,
-# then the branch meta. We never touch your kernel without asking: the meta tracks
-# the LATEST edge build, which may be newer than the one you booted.
-if [ ! -d "/lib/modules/$KREL/build" ]; then
-	say "getting kernel headers matching $KREL (without changing your kernel) ..."
-	# Armbian versions linux-headers-<branch> by ARMBIAN release (e.g. 25.11.2),
-	# not by kernel version. The header package at the SAME version as your
-	# installed kernel image is the header set for your running kernel -- so pin to
-	# it and we get matching headers without upgrading the kernel.
-	# --allow-downgrades: the headers meta may already be at the LATEST version
-	# (if a previous run pulled it); pinning back to the kernel's version is a
-	# downgrade of that package, which apt refuses without this flag.
-	IMGVER="$(dpkg-query -W -f='${Version}' "linux-image-$BRANCH" 2>/dev/null || true)"
-	[ -n "$IMGVER" ] && $SUDO apt-get install -y --allow-downgrades "linux-headers-$BRANCH=$IMGVER" >/dev/null 2>&1 || true
-	[ -d "/lib/modules/$KREL/build" ] || $SUDO apt-get install -y "linux-headers-$KREL" >/dev/null 2>&1 || true
-fi
-if [ ! -d "/lib/modules/$KREL/build" ]; then
-	HVER="$(ls -d /usr/src/linux-headers-*-"$BRANCH" 2>/dev/null | sort -V | tail -1 | sed 's|.*/linux-headers-||')"
-	say "No headers for your running kernel ($KREL)."
-	[ -n "$HVER" ] && say "Armbian's '$BRANCH' branch has moved on to $HVER and no longer ships headers for older builds."
-	CHOICE="${KILN_KERNEL:-}"
-	if [ -z "$CHOICE" ] && [ -e /dev/tty ]; then
-		printf '\nChoose (default keeps your kernel):\n  [k] KEEP %s -- stop here; you install its matching headers, then re-run\n  [u] UPGRADE the kernel to %s and reboot (edge; may be less stable)\nk/u? ' \
-			"$KREL" "${HVER:-the latest edge}" >/dev/tty
-		read -r CHOICE </dev/tty || CHOICE=k
-	fi
-	case "${CHOICE:-k}" in
-	u|U|upgrade)
-		say "upgrading kernel to ${HVER:-latest} (linux-image/linux-dtb/linux-headers-$BRANCH) ..."
-		$SUDO apt-get install -y "linux-image-$BRANCH" "linux-dtb-$BRANCH" "linux-headers-$BRANCH" || true
-		die "Kernel upgraded. Reboot (sudo reboot) into it, then re-run this installer." ;;
-	*)
-		die "Keeping $KREL. Kiln builds fine on 6.x (its shims cover 6.1->7.x) -- the only
- blocker is the missing headers for THIS kernel. Get them by one of:
-   - dpkg -i a linux-headers-$KREL .deb saved from when this kernel was current; or
-   - enable the Armbian archive apt repo, then: sudo apt install linux-headers-$KREL; or
-   - re-run non-interactively to upgrade instead:  KILN_KERNEL=u curl -fsSL <url> | bash
- Then re-run this installer." ;;
-	esac
-fi
+# --- 2. KERNEL PHASE (install the patched kernel once, then reboot) ----------
+on_patched_kernel(){ [ -f "$MARKER" ] && [ "$KREL" = "$(cat "$MARKER" 2>/dev/null)" ]; }
 
-# --- 2. fetch Kiln ----------------------------------------------------------
+if ! on_patched_kernel; then
+	say "installing the Kiln-patched Armbian kernel (NPU pm-domain fix) from the '$KTAG' release ..."
+	TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+	( cd "$TMP" && curl -fsSL "https://api.github.com/repos/$GH/releases/tags/$KTAG" \
+		| grep -o 'https://[^"]*\.deb' | xargs -n1 -r curl -fLO ) \
+		|| die "could not download the patched kernel .debs from the '$KTAG' release."
+	IMG="$(ls "$TMP"/linux-image-*.deb 2>/dev/null | head -1)"
+	[ -f "$IMG" ] || die "no linux-image .deb in the '$KTAG' release (is the CI build published?)."
+	KREL_NEW="$(dpkg-deb -c "$IMG" | grep -oE 'lib/modules/[^/]+' | head -1 | cut -d/ -f3)"
+	say "installing kernel $KREL_NEW (image + dtb + headers) ..."
+	$SUDO dpkg -i "$TMP"/linux-image-*.deb "$TMP"/linux-dtb-*.deb "$TMP"/linux-headers-*.deb \
+		|| die "dpkg failed installing the patched kernel."
+	# Hold, so 'apt upgrade' won't swap the patched kernel back for a stock one.
+	$SUDO apt-mark hold linux-image-edge-rockchip64 linux-dtb-edge-rockchip64 \
+		linux-headers-edge-rockchip64 >/dev/null 2>&1 || true
+	$SUDO mkdir -p /etc/kiln; echo "$KREL_NEW" | $SUDO tee "$MARKER" >/dev/null
+	cat <<EOF
+
+[kiln] Patched kernel $KREL_NEW installed and held.
+       REBOOT into it, then run this installer again to finish:
+
+           sudo reboot
+           curl -fsSL https://raw.githubusercontent.com/$GH/main/scripts/kiln-install.sh | bash
+EOF
+	exit 0
+fi
+say "on the Kiln-patched kernel ($KREL) — finishing the install."
+
+# --- 3. fetch Kiln ----------------------------------------------------------
 say "fetching Kiln into $KILN_DIR ..."
 if [ -d "$KILN_DIR/.git" ]; then $SUDO git -C "$KILN_DIR" pull --ff-only || true
 else $SUDO rm -rf "$KILN_DIR"; $SUDO git clone --depth 1 "$REPO" "$KILN_DIR"; fi
-# We cloned as root but the rest (fetch runtimes/assets, g++ demos) runs as you and
-# writes back into the repo (buildroot/dl, model/). Hand the tree to the caller so
-# those writes don't hit "Permission denied".
+# Cloned as root, but fetch-runtimes / g++ demos run as you and write back into
+# the tree (buildroot/dl, model/); hand it over so those writes don't EPERM.
 $SUDO chown -R "$(id -u):$(id -g)" "$KILN_DIR"
 cd "$KILN_DIR"
 
-# --- 3. driver via DKMS (builds against the running kernel -> vermagic matches)
+# --- 4. driver via DKMS -----------------------------------------------------
+# Headers came WITH the patched kernel (linux-headers deb), so this always matches.
+[ -d "/lib/modules/$KREL/build" ] \
+	|| die "no kernel headers for $KREL (the patched linux-headers deb should provide them)."
 say "building the rknpu driver with DKMS (fetches GPL source + applies the patch) ..."
 $SUDO rm -rf "/usr/src/$PKG-$VER"; $SUDO mkdir -p "/usr/src/$PKG-$VER"
 $SUDO cp -r Kbuild Makefile dkms.conf driver "/usr/src/$PKG-$VER/"
@@ -92,12 +95,11 @@ $SUDO dkms remove "$PKG/$VER" --all >/dev/null 2>&1 || true
 $SUDO dkms add "/usr/src/$PKG-$VER"
 $SUDO dkms build "$PKG/$VER"
 $SUDO dkms install "$PKG/$VER"
-# Load rknpu at boot. Loading a module needs root, so the demos shouldn't have to
-# each run; the overlay's NPU node is up before userspace, so a boot-time modprobe
-# binds it and the DRM render node is ready. (depmod already ran via dkms install.)
+# Load rknpu at boot (loading a module needs root; the overlay's NPU node is up
+# before userspace, so a boot-time modprobe binds it and the render node is ready).
 echo rknpu | $SUDO tee /etc/modules-load.d/rknpu.conf >/dev/null
 
-# --- 4. NPU device-tree overlay (self-contained; symbols resolved at boot) ---
+# --- 5. NPU device-tree overlay (self-contained; symbols resolved at boot) ---
 say "installing the NPU overlay -> /boot/overlay-user/kiln-npu.dtbo ..."
 DTBO="dts/rk3576-rock-4d-kiln-npu.dtbo"
 [ -f "$DTBO" ] || dtc -@ -I dts -O dtb -o "$DTBO" dts/rk3576-rock-4d-kiln-npu.dtso 2>/dev/null
@@ -109,7 +111,7 @@ else
 	echo 'user_overlays=kiln-npu' | $SUDO tee -a /boot/armbianEnv.txt >/dev/null
 fi
 
-# --- 5. runtimes + demos (native aarch64 build) + vision assets --------------
+# --- 6. runtimes + demos (native aarch64 build) + vision assets --------------
 say "fetching runtimes and building the demos ..."
 bash buildroot/fetch-runtimes.sh
 bash buildroot/fetch-vision-assets.sh || true
@@ -136,23 +138,25 @@ for f in test.jpg imagenet_labels.txt mobilenetv2-12_rk3576.rknn; do
 	[ -f "model/$f" ] && $SUDO install -m0644 "model/$f" /opt/models/ || true
 done
 
-# --- 6. finish --------------------------------------------------------------
+# --- 7. finish --------------------------------------------------------------
 $SUDO depmod -a "$KREL" || true
 cat <<EOF
 
-[kiln] Installed. Now REBOOT to apply the NPU overlay:   sudo reboot
+[kiln] Installed on the patched kernel. REBOOT to apply the NPU overlay + load rknpu:
+
+    sudo reboot
 
 After reboot:
-  dmesg | grep -i rknpu
+  sudo dmesg | grep -i rknpu
       # expect:  RKNPU ... kiln mmu enable_all: ... st=0x19/0x19/0x19/0x19
-  ls /dev/dri/renderD*
+      # and NO   'failed to get pm runtime for npu0, ret: -110'
+  ls /dev/dri/renderD*          # renderD129 (NPU) present
 
   # vision (needs a MobileNet .rknn matched to librknnrt 2.3.0 in /opt/models):
   kiln-vision /opt/models/test.jpg
-
-  # LLM (put a *-rk3576-w4a16.rkllm in /opt/models and set MODEL= in /usr/bin/kiln-chat):
+  # LLM (put a *-rk3576-w4a16.rkllm in /opt/models):
   kiln-chat
 
 Models are not shipped. Copy your mobilenetv2-12_rk3576.rknn and/or your
-*-rk3576-w4a16.rkllm into /opt/models on this board (scp from your dev machine).
+*-rk3576-w4a16.rkllm into /opt/models (scp from your dev machine).
 EOF
