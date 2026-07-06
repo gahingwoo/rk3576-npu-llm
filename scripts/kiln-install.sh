@@ -59,9 +59,30 @@ if ! on_patched_kernel; then
 	# dpkg-deb tar listing, which under 'set -o pipefail' aborts the script. sort -u
 	# consumes all input and a linux-image has exactly one /lib/modules/<release>.
 	KREL_NEW="$(dpkg-deb -c "$IMG" | grep -oE 'lib/modules/[^/]+' | sort -u | cut -d/ -f3)"
-	say "installing kernel $KREL_NEW (image + dtb + headers) ..."
-	$SUDO dpkg -i "$TMP"/linux-image-*.deb "$TMP"/linux-dtb-*.deb "$TMP"/linux-headers-*.deb \
-		|| die "dpkg failed installing the patched kernel."
+	# Configure linux-HEADERS first: its postinst compiles the kernel-headers build
+	# scripts (fixdep/modpost/...). linux-image's postinst then runs 'dkms
+	# autoinstall', which builds out-of-tree modules (e.g. the aic8800 wifi driver)
+	# against that tree. If the image is configured first, DKMS builds against an
+	# unprepared headers tree, fails, and fails the whole dpkg run.
+	say "installing kernel $KREL_NEW (headers first, so DKMS builds against a ready tree) ..."
+	$SUDO dpkg -i "$TMP"/linux-headers-*.deb || die "installing linux-headers failed."
+	if ! $SUDO dpkg -i "$TMP"/linux-dtb-*.deb "$TMP"/linux-image-*.deb; then
+		# The kernel still unpacked; only some third-party DKMS module that can't
+		# build on the new kernel failed the postinst. Verify our kernel landed,
+		# then drop such modules so the package configures and apt stays usable.
+		[ -e "/boot/vmlinuz-$KREL_NEW" ] || [ -d "/lib/modules/$KREL_NEW/kernel" ] \
+			|| die "the patched kernel $KREL_NEW did not install (see dpkg errors above)."
+		say "a DKMS module failed to build on $KREL_NEW; removing it so the kernel configures"
+		say "(a driver like aic8800 wifi may stop working until it supports 7.1) ..."
+		$SUDO dkms status 2>/dev/null | sed -E 's#[/,:]# #g' | awk '{print $1, $2}' | sort -u | \
+		while read -r m v; do
+			[ -n "$m" ] && [ "$m" != "$PKG" ] || continue
+			$SUDO dkms status -m "$m" -v "$v" -k "$KREL_NEW" 2>/dev/null | grep -q installed && continue
+			say "  removing DKMS $m/$v (does not build on $KREL_NEW)"
+			$SUDO dkms remove "$m/$v" --all >/dev/null 2>&1 || true
+		done
+		$SUDO dpkg --configure -a || die "kernel still won't configure; run 'sudo dpkg --configure -a'."
+	fi
 	# Hold, so 'apt upgrade' won't swap the patched kernel back for a stock one.
 	$SUDO apt-mark hold linux-image-edge-rockchip64 linux-dtb-edge-rockchip64 \
 		linux-headers-edge-rockchip64 >/dev/null 2>&1 || true
