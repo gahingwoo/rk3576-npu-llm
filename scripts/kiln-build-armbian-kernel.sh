@@ -12,10 +12,16 @@
 #   BOARD=<from /etc/armbian-release>  bash scripts/kiln-build-armbian-kernel.sh
 set -euo pipefail
 
-# ROCK 4D's Armbian board slug + branch. CONFIRM on the board with:
+# ROCK 4D's Armbian board slug + branch (config/boards/radxa-rock-4d.conf,
+# BOARDFAMILY=rk35xx, KERNEL_TARGET="vendor,edge"). CONFIRM on the board with:
 #   cat /etc/armbian-release | grep -E '^(BOARD|BRANCH)='
-BOARD="${BOARD:-${KILN_BOARD:-rock-4d}}"
+BOARD="${BOARD:-${KILN_BOARD:-radxa-rock-4d}}"
 BRANCH="${BRANCH:-${KILN_BRANCH:-edge}}"
+# Armbian's rockchip64 kernel patch dir is versioned, NOT per-branch. From
+# config/sources/families/include/rockchip64_common.inc: current->6.18,
+# edge->7.1, bleedingedge->7.2. edge (7.1) is the base Kiln's NPU patches were
+# written on, so they apply cleanly. Override KVER if edge moves on.
+KVER="${KVER:-7.1}"
 ARMBIAN_REPO="${ARMBIAN_REPO:-https://github.com/armbian/build.git}"
 WORK="${KILN_BUILD_DIR:-$HOME/kiln-armbian-build}"
 HERE="$(cd "$(dirname "$0")/.." && pwd)"     # kiln repo root
@@ -38,9 +44,10 @@ else
 fi
 
 # 2. drop Kiln's kernel patches into userpatches -----------------------------
-# Armbian applies every .patch under userpatches/kernel/archive/<family>-<branch>/
-# on top of its own kernel patch set. rockchip64 is the family for rock-4d edge.
-PDIR="$WORK/userpatches/kernel/archive/rockchip64-$BRANCH"
+# Armbian applies every .patch under userpatches/kernel/archive/<KERNELPATCHDIR>/
+# on top of its own kernel patch set. For rk35xx/rockchip64 edge that dir is
+# versioned (rockchip64-7.1), not rockchip64-edge.
+PDIR="$WORK/userpatches/kernel/archive/rockchip64-$KVER"
 say "installing Kiln kernel patches ($KPATCHES) into $PDIR ..."
 mkdir -p "$PDIR"
 for n in $KPATCHES; do

@@ -15,7 +15,11 @@ cleanly to Armbian **edge** (7.1, same `linux-next` base it was written on).
 
 ## 1. Build the patched kernel (on an x86_64 host)
 
-Confirm your board slug and branch on the board first:
+The ROCK 4D's Armbian board slug is **`radxa-rock-4d`** (BOARDFAMILY `rk35xx`),
+and on Armbian **edge** the kernel is **7.1** (`current` is 6.18, `bleedingedge`
+is 7.2 — see `config/sources/families/include/rockchip64_common.inc`). Kiln's NPU
+patches were written on the 7.1 base, so edge is the right target. Confirm on the
+board if unsure:
 
 ```sh
 cat /etc/armbian-release | grep -E '^(BOARD|BRANCH)='
@@ -26,12 +30,12 @@ Then on an x86_64 build host (the Armbian framework cross-compiles):
 ```sh
 git clone https://github.com/gahingwoo/kiln.git
 cd kiln
-BOARD=<slug-from-armbian-release> BRANCH=edge bash scripts/kiln-build-armbian-kernel.sh
+BOARD=radxa-rock-4d BRANCH=edge bash scripts/kiln-build-armbian-kernel.sh
 ```
 
 That clones the Armbian build framework, drops `kernel-patches/0001-*.patch` into
-`userpatches/kernel/archive/rockchip64-edge/`, and runs
-`./compile.sh kernel BOARD=<slug> BRANCH=edge`. The result is a set of
+`userpatches/kernel/archive/rockchip64-7.1/` (edge → 7.1), and runs
+`./compile.sh kernel BOARD=radxa-rock-4d BRANCH=edge`. The result is a set of
 `linux-image-*`, `linux-dtb-*`, `linux-headers-*` `.deb` files in
 `~/kiln-armbian-build/output/debs/`.
 
