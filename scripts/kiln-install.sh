@@ -32,7 +32,19 @@ say "installing prerequisites (kernel headers: linux-headers-$BRANCH) ..."
 $SUDO apt-get update -qq || true
 $SUDO apt-get install -y git build-essential dkms device-tree-compiler "linux-headers-$BRANCH" \
 	|| die "apt failed. If linux-headers-$BRANCH is missing, install kernel headers via 'armbian-config' (System -> Install headers) and re-run."
-[ -d "/lib/modules/$KREL/build" ] || die "kernel headers for $KREL not found (/lib/modules/$KREL/build). Install linux-headers-$BRANCH."
+if [ ! -d "/lib/modules/$KREL/build" ]; then
+	# The linux-headers-$BRANCH meta tracks the LATEST edge kernel, which is often
+	# newer than the one currently booted (a stale, un-upgraded kernel). Detect it.
+	HDR="$(ls -d /usr/src/linux-headers-*-"$BRANCH" 2>/dev/null | head -1)"
+	HVER="${HDR:+$(basename "$HDR" | sed 's/^linux-headers-//')}"
+	if [ -n "$HVER" ] && [ "$HVER" != "$KREL" ]; then
+		say "headers are for $HVER but you are running $KREL — your Armbian kernel is stale."
+		say "upgrading the kernel to $HVER to match (linux-image/linux-dtb-$BRANCH) ..."
+		$SUDO apt-get install -y "linux-image-$BRANCH" "linux-dtb-$BRANCH" || true
+		die "kernel upgraded to $HVER. REBOOT into it (sudo reboot), then re-run this installer."
+	fi
+	die "kernel headers for $KREL not found (/lib/modules/$KREL/build). Install linux-headers-$BRANCH."
+fi
 
 # --- 2. fetch Kiln ----------------------------------------------------------
 say "fetching Kiln into $KILN_DIR ..."
