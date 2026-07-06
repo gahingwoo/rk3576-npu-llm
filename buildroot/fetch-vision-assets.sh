@@ -34,7 +34,7 @@ cat <<'EOF'
                   std_values=[[58.395,57.12,57.375]], target_platform='rk3576')
          r.load_onnx('mobilenetv2-12.onnx')
          r.build(do_quantization=True, dataset='dataset.txt')  # a few sample images
-         r.export_rknn('mobilenet-rk3576.rknn')
+         r.export_rknn('mobilenet_v2_for_rk3576.rknn')
 
-       then copy mobilenet-rk3576.rknn into model/  (baked to /opt/models).
+       then copy mobilenet_v2_for_rk3576.rknn into model/  (baked to /opt/models).
 EOF

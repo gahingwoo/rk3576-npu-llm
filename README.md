@@ -51,7 +51,7 @@ Bring-up caveats (honest):
 RKNN path (`librknnrt`) that classifies an image on the same NPU, to confirm the
 driver fix generalises from transformer matmul to convolution. `kiln-vision
 <image>` prints the top-5 ImageNet classes + inference time. You supply a
-converted `mobilenet-rk3576.rknn`; see [`VISION.md`](VISION.md).
+converted `mobilenet_v2_for_rk3576.rknn`; see [`VISION.md`](VISION.md).
 
 ## Build
 

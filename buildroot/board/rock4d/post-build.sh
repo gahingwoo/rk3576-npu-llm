@@ -70,14 +70,22 @@ build_one "$KILN/buildroot/board/rock4d/rknn_mobilenet.cpp" "$TARGET_DIR/usr/bin
 # librknnrt.so alongside librkllmrt.so for the vision demo
 [ -f "$DL/librknnrt.so" ] && install -D -m0644 "$DL/librknnrt.so" "$TARGET_DIR/usr/lib/librknnrt.so"
 
-# --- 3. model (default: NOT baked in; scp after boot) -----------------------
+# --- 3. models + vision assets ----------------------------------------------
 mkdir -p "$TARGET_DIR/opt/models"
+# vision test image + ImageNet labels (small; always bake if present)
+[ -f "$KILN/model/test.jpg" ]            && install -m0644 "$KILN/model/test.jpg"            "$TARGET_DIR/opt/models/test.jpg"
+[ -f "$KILN/model/imagenet_labels.txt" ] && install -m0644 "$KILN/model/imagenet_labels.txt" "$TARGET_DIR/opt/models/imagenet_labels.txt"
+# MobileNet .rknn (small, ~6 MB) for the vision control experiment
+[ -f "$KILN/model/mobilenet_v2_for_rk3576.rknn" ] \
+	&& install -m0644 "$KILN/model/mobilenet_v2_for_rk3576.rknn" "$TARGET_DIR/opt/models/mobilenet_v2_for_rk3576.rknn" \
+	&& echo "[kiln] baked mobilenet_v2_for_rk3576.rknn into /opt/models/"
+# LLM model (large, ~1.4 GB) only when KILN_BAKE_MODEL=1
 if [ "${KILN_BAKE_MODEL:-0}" = "1" ]; then
 	M="$KILN/model/Qwen2.5-1.5B-rk3576-w4a16.rkllm"
 	[ -f "$M" ] && install -D -m0644 "$M" "$TARGET_DIR/opt/models/$(basename "$M")" \
-		&& echo "[kiln] baked model into /opt/models/ (image will be ~1.4 GB larger)"
+		&& echo "[kiln] baked LLM model into /opt/models/ (image ~1.4 GB larger)"
 else
-	echo "[kiln] model NOT baked in; scp it to /opt/models on the board (docs/BRINGUP.md 5)"
+	echo "[kiln] LLM model NOT baked in; scp it to /opt/models on the board"
 fi
 
 # --- auto-load rknpu at boot (before anything tries to use the NPU) ---------

@@ -21,13 +21,13 @@ also a useful, fast, deterministic workload for probing the NPU next to the LLM.
 
 Rockchip ships the MobileNet **ONNX**, not a pre-converted RK3576 `.rknn`, so
 convert it once on an **x86** host with `rknn-toolkit2` (target `rk3576`) and
-drop `mobilenet-rk3576.rknn` into `/opt/models/`. `buildroot/fetch-vision-assets.sh`
+drop `mobilenet_v2_for_rk3576.rknn` into `/opt/models/`. `buildroot/fetch-vision-assets.sh`
 fetches the test image + labels and prints the exact conversion snippet.
 
 ## Run
 
 ```sh
-# on the board, after copying mobilenet-rk3576.rknn to /opt/models/
+# on the board, after copying mobilenet_v2_for_rk3576.rknn to /opt/models/
 kiln-vision /opt/models/test.jpg
 ```
 
@@ -47,7 +47,7 @@ top-5 of 1000 classes  (NPU inference 3.2 ms):
 
 `fetch-runtimes.sh` fetches `rknn_api.h` + `stb_image.h`; `post-build.sh` builds
 `rknn_mobilenet` next to `rkllm_demo`, installs `librknnrt.so`, and bakes the test
-image + labels. A `mobilenet-rk3576.rknn` in `model/` is baked to `/opt/models/`.
+image + labels. A `mobilenet_v2_for_rk3576.rknn` in `model/` is baked to `/opt/models/`.
 
 ## Why "control experiment"
 
