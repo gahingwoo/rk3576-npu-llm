@@ -1,34 +1,36 @@
 From: Jiaxing Hu <huhuvmb88@outlook.com>
-Date: Mon, 6 Jul 2026 00:00:00 +0000
+Date: Mon, 7 Jul 2026 00:00:00 +0000
 Subject: [PATCH] arm64: dts: rockchip: rk3576: add vendor rknpu NPU node
 
-Mainline rk3576.dtsi has no NPU compute node (mainline's accel/rocket path
-uses a different, rknn_core layout). Add the vendor-shaped npu@27700000 plus
-its two v2 IOMMUs for the out-of-tree rknpu (v0.9.8) driver, disabled by
-default, and enable it on the Radxa ROCK 4D with its vdd_npu_s0 supply.
+Mainline rk3576.dtsi has no NPU compute node (mainline's accel/rocket path uses a
+different rknn_core layout). Add the vendor-shaped npu@27700000 + its two v2
+IOMMUs for the out-of-tree rknpu (v0.9.8) driver, disabled by default, enabled on
+the Radxa ROCK 4D with vdd_npu_s0.
 
-clk_npu is the NPU DSU clock, owned by BL31 firmware, so it is taken through
-&scmi_clk at the firmware SCMI index 238 (not CRU CLK_RKNN_DSU0) -- otherwise
-the NPU power domain never settles and probe fails with -110. Compiles into a
-valid rk3576-rock-4d.dtb on mainline 7.1.3 (all clock/reset/power/scmi phandles
-resolve).
+Two board-specific clocking requirements, learned on hardware:
+- clk_npu goes via CRU CLK_RKNN_DSU0, not &scmi_clk: the SCMI route is clamped to
+  198 MHz by this board's ATF and the NPU core then wedges; the driver sets the
+  CRU clock to 594 MHz.
+- PCLK_NPUTOP_ROOT ("pclk") is listed on the node so the driver keeps it enabled;
+  it clocks the NPU-top control block, and without it the first NPU core register
+  read (RKNPU_GET_HW_VERSION at base+0x0) raises an asynchronous SError.
 
 Signed-off-by: Jiaxing Hu <huhuvmb88@outlook.com>
 ---
 --- a/arch/arm64/boot/dts/rockchip/rk3576.dtsi
 +++ b/arch/arm64/boot/dts/rockchip/rk3576.dtsi
-@@ -858,6 +858,77 @@
+@@ -858,6 +858,78 @@
  			reg = <0x0 0x26018000 0x0 0x2000>;
  		};
  
 +		/*
-+		 * Kiln: vendor-shaped RK3576 NPU for the out-of-tree rknpu (v0.9.8)
-+		 * driver. Mainline has no NPU compute node (its accel/rocket path uses a
-+		 * different, rknn_core layout), so Kiln adds this one. clk_npu is the DSU
-+		 * clock, owned by BL31 firmware: it MUST come through &scmi_clk at the
-+		 * firmware SCMI index 238 (SCMI_CLK_RKNN_DSU0), not CRU CLK_RKNN_DSU0,
-+		 * or the NPU power domain never settles (probe fails -110). Disabled here;
-+		 * a board enables it and adds npu-supply.
++		 * Kiln: vendor-shaped RK3576 NPU for the out-of-tree rknpu (v0.9.8) driver.
++		 * Mainline has no NPU compute node (its accel/rocket path uses a different
++		 * rknn_core layout), so Kiln adds this one. clk_npu is the DSU clock taken
++		 * via CRU CLK_RKNN_DSU0 (the driver bumps it to 594 MHz; the SCMI route is
++		 * clamped to 198 MHz by this board's firmware and the NPU core then wedges).
++		 * PCLK_NPUTOP_ROOT ("pclk") MUST be listed: it clocks the NPU-top control
++		 * block, so without it reading the core version register async-SErrors.
 +		 */
 +		rknpu: npu@27700000 {
 +			compatible = "rockchip,rk3576-rknpu";
@@ -37,11 +39,12 @@ Signed-off-by: Jiaxing Hu <huhuvmb88@outlook.com>
 +			interrupts = <GIC_SPI 247 IRQ_TYPE_LEVEL_HIGH>,
 +				     <GIC_SPI 248 IRQ_TYPE_LEVEL_HIGH>;
 +			interrupt-names = "npu0_irq", "npu1_irq";
-+			clocks = <&scmi_clk 238>, <&cru ACLK_RKNN0>,
++			clocks = <&cru CLK_RKNN_DSU0>, <&cru ACLK_RKNN0>,
 +				 <&cru ACLK_RKNN1>, <&cru HCLK_RKNN_ROOT>,
-+				 <&cru ACLK_RKNN_CBUF>, <&cru HCLK_RKNN_CBUF>;
++				 <&cru ACLK_RKNN_CBUF>, <&cru HCLK_RKNN_CBUF>,
++				 <&cru PCLK_NPUTOP_ROOT>;
 +			clock-names = "clk_npu", "aclk0", "aclk1", "hclk_root",
-+				      "aclk_cbuf", "hclk_cbuf";
++				      "aclk_cbuf", "hclk_cbuf", "pclk";
 +			assigned-clocks = <&cru CLK_RKNN_DSU0>;
 +			assigned-clock-rates = <198000000>;
 +			resets = <&cru SRST_A_RKNN0>, <&cru SRST_A_RKNN1>,
