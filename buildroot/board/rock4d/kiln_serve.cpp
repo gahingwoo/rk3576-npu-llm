@@ -1,15 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
-// kiln-serve -- an OpenAI-compatible HTTP API for the LLM running on the RK3576
-// NPU (librkllmrt). It wraps the SAME RKLLM call sequence as kiln-chat (via
-// kiln_llm.h), so nothing about inference is re-implemented -- only an HTTP +
+// kiln-serve -- an OpenAI-compatible HTTP API for the NPU. It wraps the SAME
+// RKLLM/RKNN call sequences as kiln-chat / kiln-vision (via kiln_llm.h /
+// kiln_vision.h), so nothing about inference is re-implemented -- only an HTTP +
 // SSE layer on top. Config comes from the unified /etc/kiln/config.ini.
 //
+//   GET  /health               liveness
 //   GET  /v1/models            list the .rkllm model(s)
 //   POST /v1/chat/completions  OpenAI chat; `stream:true` -> SSE token stream
-//   GET  /health               liveness
+//   POST /v1/vision/classify   image -> top-N classes (custom shape)
 //
-// The model is loaded once at startup (rkllm_init is heavy: it maps the whole
-// model). The NPU is single-tenant, so requests are serialized in kiln_llm.
+// The LLM and the vision model are each loaded once at startup and are BOTH
+// optional: a vision-only box (e.g. RK3568, no .rkllm) serves vision and answers
+// 503 on /v1/chat/completions; an LLM-only box serves chat. The NPU is
+// single-tenant, so requests are serialized in kiln_llm / kiln_vision.
 // Build: needs httplib.h (cpp-httplib) + json.hpp (nlohmann/json), both
 // header-only, fetched by buildroot/fetch-runtimes.sh. No runtime deps beyond
 // librkllmrt + libgomp.
@@ -93,17 +96,28 @@ int main(int argc, char **argv) {
     const std::string model_path = cfg.server_llm();
     const std::string model_name = model_path.substr(model_path.find_last_of('/') + 1);
 
-    printf("kiln-serve: loading %s onto the NPU ...\n", model_path.c_str());
-    KilnConfig lc = cfg;
-    lc.llm_model = model_path;
-    KilnLLM llm;
-    int ret = llm.init(lc);
-    if (ret != 0) {
-        fprintf(stderr, "kiln-serve: rkllm_init failed (%d). Check the .rkllm path/model.\n", ret);
-        return 1;
+    // Optional LLM: RK3568 (and any vision-only box) has no .rkllm, so don't hard
+    // fail -- start vision-only and let /v1/chat/completions answer 503.
+    std::unique_ptr<KilnLLM> llm;
+    {
+        FILE *mf = fopen(model_path.c_str(), "rb");
+        if (mf) {
+            fclose(mf);
+            printf("kiln-serve: loading %s onto the NPU ...\n", model_path.c_str());
+            KilnConfig lc = cfg;
+            lc.llm_model = model_path;
+            llm.reset(new KilnLLM());
+            if (llm->init(lc) != 0) {
+                fprintf(stderr, "kiln-serve: LLM disabled (rkllm_init failed for %s)\n", model_path.c_str());
+                llm.reset();
+            } else {
+                llm->set_chat_template("", "", "");  // we pass a full ChatML string
+                printf("kiln-serve: LLM ready (%s)\n", model_name.c_str());
+            }
+        } else {
+            printf("kiln-serve: no LLM model at %s -- vision-only mode\n", model_path.c_str());
+        }
     }
-    // Pass-through template: we hand the runtime a fully-formed ChatML string.
-    llm.set_chat_template("", "", "");
 
     // Optional vision: only load it if the .rknn exists, so a box that only wants
     // the LLM doesn't pay for it (and it never crashes when absent).
@@ -123,7 +137,13 @@ int main(int argc, char **argv) {
         }
     }
 
-    printf("kiln-serve: model ready. Listening on http://%s:%d  (OpenAI /v1)\n",
+    if (!llm && !vision) {
+        fprintf(stderr, "kiln-serve: neither an LLM (.rkllm) nor a vision (.rknn) model "
+                        "was loadable. Check /etc/kiln/config.ini.\n");
+        return 1;
+    }
+    printf("kiln-serve: ready [%s%s]. Listening on http://%s:%d  (OpenAI /v1)\n",
+           llm ? "chat" : "", vision ? (llm ? "+vision" : "vision") : "",
            cfg.server_host.c_str(), cfg.server_port);
 
     httplib::Server srv;
@@ -134,16 +154,23 @@ int main(int argc, char **argv) {
 
     srv.Get("/v1/models", [&](const httplib::Request &, httplib::Response &res) {
         json data = json::array();
-        for (const auto &p : list_models(model_path)) {
-            std::string n = p.substr(p.find_last_of('/') + 1);
-            data.push_back({{"id", n}, {"object", "model"}, {"owned_by", "kiln"}});
+        if (llm) {
+            for (const auto &p : list_models(model_path)) {
+                std::string n = p.substr(p.find_last_of('/') + 1);
+                data.push_back({{"id", n}, {"object", "model"}, {"owned_by", "kiln"}});
+            }
+            if (data.empty())
+                data.push_back({{"id", model_name}, {"object", "model"}, {"owned_by", "kiln"}});
         }
-        if (data.empty())
-            data.push_back({{"id", model_name}, {"object", "model"}, {"owned_by", "kiln"}});
         res.set_content(json{{"object", "list"}, {"data", data}}.dump(), "application/json");
     });
 
     srv.Post("/v1/chat/completions", [&](const httplib::Request &req, httplib::Response &res) {
+        if (!llm) {
+            res.status = 503;
+            res.set_content("{\"error\":\"no LLM on this box (vision-only, e.g. RK3568)\"}", "application/json");
+            return;
+        }
         json body;
         try { body = json::parse(req.body); }
         catch (...) { res.status = 400; res.set_content("{\"error\":\"invalid JSON\"}", "application/json"); return; }
@@ -174,7 +201,7 @@ int main(int argc, char **argv) {
                               {"model", model_name},
                               {"choices", {{{"index", 0}, {"delta", {{"content", tok}}}, {"finish_reason", nullptr}}}}});
                     };
-                    llm.run(prompt, false, ctx);
+                    llm->run(prompt, false, ctx);
                     // final chunk + [DONE]
                     send({{"id", id}, {"object", "chat.completion.chunk"}, {"created", created},
                           {"model", model_name},
@@ -188,7 +215,7 @@ int main(int argc, char **argv) {
             std::string full;
             KilnRunCtx ctx;
             ctx.on_token = [&](const char *tok) { full += tok; };
-            llm.run(prompt, false, ctx);
+            llm->run(prompt, false, ctx);
             json out = {
                 {"id", id}, {"object", "chat.completion"}, {"created", created},
                 {"model", model_name},

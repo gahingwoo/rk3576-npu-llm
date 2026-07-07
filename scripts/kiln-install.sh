@@ -276,12 +276,18 @@ done
 # this just makes the vision model SoC-correct and gives kiln-settings a start.
 $SUDO mkdir -p /etc/kiln
 if [ ! -f /etc/kiln/config.ini ]; then
+	# RK3568 is a vision target (LLM impractical) -> no LLM model by default;
+	# kiln-serve then runs vision-only.
+	case "$SOC" in
+		rk3568) LLM_MODEL="" ;;
+		*)      LLM_MODEL="/opt/models/Qwen2.5-1.5B-rk3576-w4a16.rkllm" ;;
+	esac
 	$SUDO tee /etc/kiln/config.ini >/dev/null <<EOF
 # Kiln unified config -- read by kiln-chat, kiln-vision, kiln-serve.
 # Edit with \`kiln-settings\` (or by hand). Only runtime-settable fields.
 
 [llm]
-model = /opt/models/Qwen2.5-1.5B-rk3576-w4a16.rkllm
+model = $LLM_MODEL
 max_context_len = 2048
 max_new_tokens = 512
 temperature = 0.8
