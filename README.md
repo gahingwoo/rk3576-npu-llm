@@ -16,10 +16,14 @@ drivers instead of the BSP's.
 
 ## Status
 
-**It works.** On real hardware (ROCK 4D, RK3576) on a mainline kernel, the vendor
-RKLLM stack runs LLM inference on the NPU and generates tokens.
+**It works.** On real hardware (ROCK 4D, RK3576) on a mainline kernel, **both**
+the RKLLM LLM stack and the RKNN vision stack run on the NPU: `kiln-chat` holds a
+multi-turn Qwen2.5-1.5B conversation and `kiln-vision` classifies images, on a
+**pure mainline `linux-7.1.3`** kernel built by CI with Kiln's patch set
+(`kernel-patches/` 0001–0006) — not just the earlier hand-built `linux-next` image.
 
-Verified end-to-end on a hand-built `linux-next` 7.1 image:
+Verified end-to-end (first on a hand-built `linux-next` 7.1 image, then on the
+pure-mainline 7.1.3 CI kernel):
 
 - The out-of-tree `rknpu` v0.9.8 driver builds against mainline 7.x and loads.
   One patch covers both the 6.1 → 7.x API drift and the RK3576 NPU-execution
@@ -43,8 +47,13 @@ TLB per job. Full write-up in [`driver/patches/README.md`](driver/patches/README
 
 Bring-up caveats (honest):
 
-- After a long idle the NPU power-domain drops; the first inference on the next
-  cold power-on can degrade until it re-warms (mitigated by a 10-min keep-warm).
+- The RK3576 NPU power domain needs a **kernel** fix, not just the module: a
+  *cold* power-on works, but a *warm* re-power (the second chat turn, or the first
+  use after a warm reboot) hit mainline's `rockchip_pmu_domain_mem_reset()`, whose
+  NPUTOP power-chain poll never completes on this SoC — the power-on aborted with
+  `-110` and the driver then SError-panicked the whole board reading an unpowered
+  core. Fixed by `kernel-patches/0006` (skip the stuck reset so warm == cold) plus
+  a driver-side bail-on-power-on-failure shim. Multi-turn chat is stable with both.
 - The orphan MMU's TLB is flushed per-job rather than tracked by the iommu core —
   fine for inference, not a general-purpose iommu fix.
 - The **Armbian** path (DKMS + DT overlay, see [`ARMBIAN.md`](ARMBIAN.md)) is
