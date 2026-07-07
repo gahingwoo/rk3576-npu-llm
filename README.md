@@ -1,13 +1,16 @@
-# rk3576-npu-llm (Kiln)
+# Kiln — LLM + vision on the mainline RK3576 NPU
 
-Run LLMs on the **Rockchip RK3576 NPU** under a **mainline** Linux kernel (7.x),
-by building the vendor GPL `rknpu` driver **out-of-tree** and driving it with the
-closed `librkllmrt` RKLLM runtime.
+Run **LLM and vision** inference on the **Rockchip RK3576 NPU** under a
+**mainline** Linux kernel (7.x), by building the vendor GPL `rknpu` driver
+**out-of-tree** and driving it with the closed `librkllmrt` (RKLLM, LLMs) and
+`librknnrt` (RKNN, CNN vision) runtimes.
 
-The vendor RKLLM stack runs multi-matmul LLMs on RK3576 — but on the vendor 6.1
-BSP kernel. Kiln puts that same stack (vendor `rknpu.ko` v0.9.8 + `librkllmrt`)
-on a **mainline** kernel, using mainline's own clock / power-domain / IOMMU
-drivers instead of the BSP's.
+The vendor RKLLM/RKNN stack runs multi-matmul LLMs and convolutional vision on
+RK3576 — but on the vendor 6.1 BSP kernel. Kiln puts that same stack (vendor
+`rknpu.ko` v0.9.8 + `librkllmrt` + `librknnrt`) on a **mainline** kernel, using
+mainline's own clock / power-domain / IOMMU drivers instead of the BSP's.
+(The repo slug is still `rk3576-npu-llm`; the LLM was the hard target, vision the
+control experiment that proved the driver fix generalises.)
 
 > **Companion project:** [`linux-rk3576-npu`](https://github.com/gahingwoo/linux-rk3576-npu)
 > is the other half of the same effort — the from-scratch *open* RK3576 NPU
