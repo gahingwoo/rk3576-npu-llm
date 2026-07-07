@@ -60,10 +60,10 @@ jobs:
           curl -fsSL "https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-${KVER}.tar.xz" | tar xJ
           echo "KDIR=$PWD/linux-${KVER}" >> "$GITHUB_ENV"
 
-      - name: Apply Kiln kernel patches (0001..0006)
+      - name: Apply Kiln kernel patches (0001..0008)
         run: |
           cd "$KDIR"
-          for p in 0001 0002 0003 0004 0005 0006; do
+          for p in 0001 0002 0003 0004 0005 0006 0007 0008; do
             f="$(ls "$GITHUB_WORKSPACE"/kernel-patches/${p}-*.patch)"
             echo "applying $(basename "$f")"; patch -p1 < "$f"
           done

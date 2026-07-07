@@ -27,8 +27,13 @@ cannot be shipped as a module.
 | `0004-arm64-dts-rk3576-add-vendor-rknpu-node.patch` | `arm64: dts` | Adds the vendor-shaped `npu@27700000` + two v2 IOMMUs to mainline `rk3576.dtsi` and enables it on ROCK 4D with `vdd_npu_s0`. Mainline has **no** NPU compute node (its accel/rocket path uses a different `rknn_core` layout), so this is what the vendor `rknpu` driver binds — the in-tree equivalent of the Armbian DT overlay. | **yes for a mainline build** |
 | `0006-pmdomain-rockchip-npu-warm-power-on-skip-broken-mem-reset.patch` | `pmdomain/rockchip` | The NPU domain powers **cold** on first use (works) but is power-cycled again on every re-acquire — between LLM chat turns, or first use after a warm reboot. A **warm** power-on (domain memory still on) runs `rockchip_pmu_domain_mem_reset()`, whose NPUTOP power-*chain* poll never completes on this SoC → `failed to get chain status 'nputop'` → the power-on aborts with `-110` → the rknpu driver reads an unpowered core → **async SError that panics the board**. Skip the optional SRAM reset when the chain poll times out so the warm path finishes powering on exactly like the (working) cold path. **This is the fix for the second-chat-turn / post-panic-reboot board freeze.** | **yes — the LLM one** |
 
-For a **mainline** build apply **0001 + 0002 + 0003 + 0004 + 0005 + 0006** (the CI
-does). 0001 alone stops the pd-power SError, but the NPU also needs 0002+0005 (BIU
+| `0007-iommu-rockchip-skip-orphaned-fault-banks-in-stall-active.patch` | `iommu/rockchip` | The RK3576 NPU MMU banks can boot with an orphaned `PAGE_FAULT_ACTIVE` (no stall, idle) left by firmware. `rk_iommu_is_stall_active()` then reports the whole IOMMU "not stalled" forever, so `rk_iommu_resume()`'s stall poll never passes. Skip those quiescent banks. **The buildroot linux-next kernel that runs the stack carries this; Kiln's 7.1.3 omitted it, and a stall-poll timeout during the NPU's iommu resume can stall the shared PMU path → `cpu _set_opp_voltage … -110` → board wedge.** | **yes** |
+| `0008-iommu-rockchip-skip-orphaned-fault-banks-in-enable-stall.patch` | `iommu/rockchip` | Same orphaned-fault banks: don't send `CMD_ENABLE_STALL` to them — the dropped command also delays the *other* banks past the poll timeout. Pairs with 0007. | **yes** |
+
+For a **mainline** build apply **0001 + 0002 + 0003 + 0004 + 0005 + 0006 + 0007 +
+0008** (the CI does). 0007/0008 (iommu stall on orphaned-fault banks) match the
+buildroot linux-next kernel that runs the full stack at 9.3 tok/s; without them
+the NPU's iommu resume stall-poll can time out and wedge the board via CPU DVFS. 0001 alone stops the pd-power SError, but the NPU also needs 0002+0005 (BIU
 reset + full clocks on the power transition) or the first NPU register read SErrors,
 and **0006** or the NPU wedges the board on the *second* power-on (warm re-power,
 e.g. the next LLM chat turn). 0006 pairs with the driver-side "bail on power-on
