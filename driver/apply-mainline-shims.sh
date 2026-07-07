@@ -75,21 +75,14 @@ if ! grep -q 'KILN: never touch NPU registers if power-on failed' "$RKNPU/rknpu_
 		&& echo "[kiln] applied power-on-failure bail shim (no SError on -110)."
 fi
 
-# Supplementary shim: keep the NPU power domain RESIDENT (never power it off).
-# On RK3576 only the FIRST, COLD power-on (domain SRAM was off) yields a working
-# core; a later WARM re-power (SRAM retained) comes back to "on" status but with
-# a DEAD core -- the first register read async-SErrors. The vendor BSP dodges
-# this because a session keeps the NPU powered the whole time; on mainline the
-# domain power-cycles between the boot probe and each job, so job N>1 hits the
-# warm-dead-core. Make rknpu_power_off() a no-op so, once the boot probe powers
-# the domain on cold, it stays cold-armed for the life of the module -- matching
-# the BSP/buildroot lifecycle. (Costs idle NPU power; correctness wins on a dev
-# board.) Requires a COLD boot (hard power-cycle) so the first power-on is cold.
-if ! grep -q 'KILN keep-alive: never power the NPU domain off' "$RKNPU/rknpu_drv.c"; then
-	perl -0pi -e 's!(static int rknpu_power_off\(struct rknpu_device \*rknpu_dev\)\n\{\n)!$1\t/*\n\t * KILN keep-alive: never power the NPU domain off. On RK3576 a warm\n\t * re-power comes up "on" but with a dead core (register reads SError);\n\t * only the first cold power-on works. Hold the cold-armed domain for the\n\t * module lifetime, like the vendor BSP session. Needs a cold (hard) boot.\n\t */\n\treturn 0;\n!' \
-		"$RKNPU/rknpu_drv.c" \
-		&& echo "[kiln] applied NPU power-domain keep-alive shim (never power off)."
-fi
+# NOTE: keeping the NPU resident is done from userspace, NOT in the driver.
+# An earlier no-op-rknpu_power_off() shim was WRONG: it left pm_runtime/regulator
+# refcounts unbalanced, so the next power-on wedged the shared PMU path and CPU
+# DVFS timed out (`cpu _set_opp_voltage ... -110` -> RCU stall -> board wedge).
+# The correct, proven fix (matches the rocket/buildroot S97 workaround) is to
+# disable the NPU's runtime-PM autosuspend via sysfs so it stays cold-armed:
+#   echo on > /sys/devices/platform/27700000.npu/power/control
+# Shipped as /usr/bin/kiln-npu-keepon + a udev rule (see rootfs/). No driver hack.
 
 echo "[kiln] driver/rknpu is patched for mainline + RK3576 NPU execution."
 echo "[kiln] build with: make KDIR=<your-kernel-build>"

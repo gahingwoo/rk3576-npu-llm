@@ -52,14 +52,16 @@ TLB per job. Full write-up in [`driver/patches/README.md`](driver/patches/README
 Bring-up caveats (honest):
 
 - The RK3576 NPU power domain needs a **kernel** fix, not just the module: a
-  a *cold* NPU power-on yields a working core, but on the **7.1.3 stable** kernel a
-  *warm* re-power (the second chat turn) comes back to `on` status with a **dead
-  core** — the first register read async-SErrors. Kiln keeps the NPU domain
-  **resident** (a driver keep-alive: never power it off once the cold boot probe
-  brings it up), so every use runs on the working cold-armed domain, plus a
-  bail-on-power-on-failure shim so a bad power-on is a clean error, not a board
-  panic. The buildroot linux-next 7.1 kernel runs the full stack (9.3 tok/s); the
-  7.1.3 keep-alive fix is in-tree and pending final on-board confirmation.
+  a *cold* NPU power-on yields a working core, but the mainline runtime-PM
+  autosuspend powers the domain off between jobs — and a *warm* re-power comes
+  back `on` with a **dead core** (register reads SError), while the autosuspend
+  itself races the shared PMU/regulator path and times out CPU DVFS
+  (`_set_opp_voltage … -110`), wedging the board. Kiln keeps the NPU **resident**
+  the proven way — a sysfs `power/control=on` applied by a udev rule when rknpu
+  binds (`/usr/bin/kiln-npu-keepon`), so it stays in the working cold-armed state
+  and never autosuspends — plus a driver bail-on-power-on-failure shim. The
+  buildroot linux-next 7.1 kernel runs the full stack (9.3 tok/s); the same
+  keep-resident fix carries it on the 7.1.3 build.
 - The orphan MMU's TLB is flushed per-job rather than tracked by the iommu core —
   fine for inference, not a general-purpose iommu fix.
 - The **Armbian** path (DKMS + DT overlay, see [`ARMBIAN.md`](ARMBIAN.md)) is

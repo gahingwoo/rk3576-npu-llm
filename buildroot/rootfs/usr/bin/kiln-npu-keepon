@@ -1,0 +1,14 @@
+#!/bin/sh
+# Keep the Rockchip NPU power domain RESIDENT by disabling its runtime-PM
+# autosuspend. On a mainline kernel the post-job pm_runtime autosuspend races the
+# shared PMU/regulator path -- nputop fails to idle, CPU DVFS times out
+# (`cpu _set_opp_voltage ... -110`) and the board wedges (RCU stall) -- and a
+# warm re-power also leaves a dead NPU core. Holding the device runtime-active
+# keeps it in the working cold-armed state (the proven rocket/buildroot fix,
+# done in sysfs -- no driver hack). SoC-agnostic: matches <addr>.npu.
+for c in $(find /sys/devices -path '*.npu/power/control' 2>/dev/null); do
+	echo on > "$c" 2>/dev/null || true
+done
+for d in $(find /sys/devices -path '*.npu/power/autosuspend_delay_ms' 2>/dev/null); do
+	echo 120000 > "$d" 2>/dev/null || true
+done
