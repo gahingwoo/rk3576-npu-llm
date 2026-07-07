@@ -61,5 +61,19 @@ if ! grep -q 'KILN: bring the NPU cores out of reset' "$RKNPU/rknpu_drv.c"; then
 		&& echo "[kiln] applied NPU-core reset-deassert shim."
 fi
 
+# Supplementary shim: never touch NPU registers when power-on failed. The vendor
+# rknpu_ioctl() ignores rknpu_power_get()'s return value and runs the action
+# regardless. On mainline a failed NPU power-domain transition (e.g. the NPUTOP
+# mem_reset chain-status poll timing out -> "failed to get pm runtime for npu0,
+# ret: -110") leaves the cores UNPOWERED, and the very next thing an
+# RKNPU_GET_HW_VERSION ioctl does is read base+0x0 -> async SError that panics the
+# WHOLE BOARD. Check the return and bail cleanly so a bad power-on becomes a plain
+# "rkllm init failed" instead of a machine-check. Fold into kiln-mainline.patch later.
+if ! grep -q 'KILN: never touch NPU registers if power-on failed' "$RKNPU/rknpu_drv.c"; then
+	perl -0pi -e 's!\n\trknpu_power_get\(rknpu_dev\);\n\n\tswitch \(_IOC_NR\(cmd\)\) \{!\n\tret = rknpu_power_get(rknpu_dev);\n\tif (ret) {\n\t\t/*\n\t\t * KILN: never touch NPU registers if power-on failed -- a failed NPU\n\t\t * power-domain transition (NPUTOP mem_reset chain timeout, -110) leaves\n\t\t * the cores unpowered; reading GET_HW_VERSION (base+0x0) then raises an\n\t\t * async SError that panics the whole board. Bail cleanly instead.\n\t\t */\n\t\tLOG_ERROR("rknpu_power_get failed (%d); skip ioctl to avoid SError\\n", (int)ret);\n\t\tatomic_dec_if_positive(&rknpu_dev->power_refcount);\n\t\treturn ret;\n\t}\n\n\tswitch (_IOC_NR(cmd)) {!' \
+		"$RKNPU/rknpu_drv.c" \
+		&& echo "[kiln] applied power-on-failure bail shim (no SError on -110)."
+fi
+
 echo "[kiln] driver/rknpu is patched for mainline + RK3576 NPU execution."
 echo "[kiln] build with: make KDIR=<your-kernel-build>"
