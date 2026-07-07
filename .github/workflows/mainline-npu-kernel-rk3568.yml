@@ -1,0 +1,122 @@
+name: mainline-npu-kernel-rk3568
+
+# Build a PURE mainline linux-7.1.3 kernel for the Radxa ROCK 3B (RK3568) with
+# Kiln's RK3568 NPU patches (kernel-patches-rk3568/0001..0003) -- vendor rknpu
+# NPU node + IOMMU v2 GFP_DMA32 fix. Built natively on a free arm64 GH runner;
+# published as bindeb-pkg .debs. Companion to mainline-npu-kernel.yml (RK3576).
+#
+# UNTESTED on real hardware yet -- pending ROCK 3B validation (midg971).
+#
+# Trigger: Actions tab -> "mainline-npu-kernel-rk3568" -> Run workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      kver:
+        description: "mainline kernel version (kernel.org v7.x)"
+        default: "7.1.3"
+      publish:
+        description: "attach the .deb to a GitHub release"
+        type: boolean
+        default: true
+  push:
+    paths:
+      - kernel-patches-rk3568/**
+      - .github/workflows/mainline-npu-kernel-rk3568.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mainline-npu-kernel-rk3568-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  KVER: ${{ github.event.inputs.kver || '7.1.3' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    steps:
+      - name: Checkout Kiln
+        uses: actions/checkout@v4
+
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/local/share/boost || true
+          sudo docker image prune --all --force || true
+          df -h /
+
+      - name: Install build deps (native arm64)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison flex libssl-dev libelf-dev libdw-dev \
+            build-essential dpkg-dev debhelper rsync kmod cpio xz-utils
+
+      - name: Fetch mainline linux-${{ env.KVER }}
+        run: |
+          curl -fsSL "https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-${KVER}.tar.xz" | tar xJ
+          echo "KDIR=$PWD/linux-${KVER}" >> "$GITHUB_ENV"
+
+      - name: Apply Kiln RK3568 kernel patches (0001..0003)
+        run: |
+          cd "$KDIR"
+          for p in 0001 0002 0003; do
+            f="$(ls "$GITHUB_WORKSPACE"/kernel-patches-rk3568/${p}-*.patch)"
+            echo "applying $(basename "$f")"; patch -p1 < "$f"
+          done
+
+      - name: Configure (arm64 defconfig + NPU/IOMMU on)
+        run: |
+          cd "$KDIR"
+          make ARCH=arm64 defconfig
+          # vendor rknpu (out-of-tree) is used, not the open rocket driver
+          ./scripts/config --disable DRM_ACCEL_ROCKET
+          # the NPU MMU needs the Rockchip IOMMU built in; DRM render node for GEM
+          ./scripts/config --enable ROCKCHIP_IOMMU \
+                           --enable DRM --enable DRM_ROCKCHIP \
+                           --enable ARM_ROCKCHIP_CPUFREQ || true
+          make ARCH=arm64 olddefconfig
+          echo "--- IOMMU/DRM after olddefconfig ---"
+          grep -E 'ROCKCHIP_IOMMU|DRM_ROCKCHIP|DRM_ACCEL_ROCKET' .config || true
+
+      - name: Build (bindeb-pkg)
+        run: |
+          cd "$KDIR"
+          # Unique version per build (date + run number) so a rebuilt kernel is
+          # never mistaken for an already-installed same-version deb.
+          make -j"$(nproc)" ARCH=arm64 \
+            KDEB_PKGVERSION="$(date -u +%Y%m%d).${GITHUB_RUN_NUMBER}" bindeb-pkg
+
+      - name: Collect .deb packages
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          mv linux-image-*.deb linux-headers-*.deb "$GITHUB_WORKSPACE/out/" 2>/dev/null || \
+            mv "$KDIR"/../linux-image-*.deb "$KDIR"/../linux-headers-*.deb "$GITHUB_WORKSPACE/out/"
+          rm -f "$GITHUB_WORKSPACE"/out/*-dbg_*.deb   # drop the huge debug-symbol image
+          echo "--- built ---"; ls -l "$GITHUB_WORKSPACE/out"
+          test -n "$(ls -A "$GITHUB_WORKSPACE"/out 2>/dev/null)" || { echo "no .deb produced"; exit 1; }
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kiln-mainline-npu-kernel-rk3568-${{ env.KVER }}
+          path: out/*.deb
+          if-no-files-found: error
+
+      - name: Publish to a release
+        if: ${{ github.event.inputs.publish != 'false' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=kiln-mainline-kernel-rk3568
+          NOTES="Pure mainline linux-${KVER} for Radxa ROCK 3B (RK3568) + Kiln RK3568 NPU patches (NPU DT node, RK3568_PD_NPU, IOMMU v2 GFP_DMA32 fix). bindeb-pkg. UNTESTED on hardware -- pending ROCK 3B validation. Install per RK3568.md / kiln-install.sh."
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release view "$TAG" --json assets --jq '.assets[].name' \
+              | xargs -r -I{} gh release delete-asset "$TAG" {} -y || true
+            gh release upload "$TAG" out/*.deb --clobber
+          else
+            gh release create "$TAG" out/*.deb --title "Kiln mainline NPU kernel — RK3568 / ROCK 3B (linux-${KVER})" --notes "$NOTES"
+          fi

@@ -22,7 +22,15 @@ set -euo pipefail
 
 REPO="${KILN_REPO:-https://github.com/gahingwoo/kiln.git}"
 GH="${KILN_GH:-gahingwoo/kiln}"
-KTAG="${KILN_KERNEL_TAG:-kiln-mainline-kernel}"
+# One installer serves both boards. Detect the SoC from the running (stock)
+# device-tree so we pull the right kernel release + install the right dtb/model.
+DT_COMPAT="$(tr -d '\0' < /proc/device-tree/compatible 2>/dev/null || true)"
+case "$DT_COMPAT" in
+	*rk3568*) SOC=rk3568; BOARD=rock-3b; DTB=rk3568-rock-3b.dtb; DEF_KTAG=kiln-mainline-kernel-rk3568 ;;
+	*)        SOC=rk3576; BOARD=rock-4d; DTB=rk3576-rock-4d.dtb; DEF_KTAG=kiln-mainline-kernel ;;
+esac
+MODEL_RKNN="mobilenetv2-12_${SOC}.rknn"
+KTAG="${KILN_KERNEL_TAG:-$DEF_KTAG}"
 AIC_REPO="${KILN_AIC_REPO:-https://github.com/radxa-pkg/aic8800.git}"
 AIC_REF="${KILN_AIC_REF:-5.0+git20260123.5f7be68d-6}"   # the release Kiln's patch is verified against
 KILN_DIR="${KILN_DIR:-/opt/kiln}"
@@ -67,13 +75,13 @@ wire_boot(){
 		$SUDO ln -sf "uInitrd-$k" /boot/uInitrd
 	fi
 	[ -e "/boot/vmlinuz-$k" ] && $SUDO ln -sf "vmlinuz-$k" /boot/Image
-	dtb="$(find "/usr/lib/linux-image-$k" /boot -name 'rk3576-rock-4d.dtb' 2>/dev/null | head -1)"
+	dtb="$(find "/usr/lib/linux-image-$k" /boot -name "$DTB" 2>/dev/null | head -1)"
 	if [ -n "$dtb" ]; then
-		$SUDO install -Dm0644 "$dtb" /boot/dtb/rockchip/rk3576-rock-4d.dtb
+		$SUDO install -Dm0644 "$dtb" "/boot/dtb/rockchip/$DTB"
 		if grep -q '^fdtfile=' /boot/armbianEnv.txt; then
-			$SUDO sed -i 's#^fdtfile=.*#fdtfile=rockchip/rk3576-rock-4d.dtb#' /boot/armbianEnv.txt
+			$SUDO sed -i "s#^fdtfile=.*#fdtfile=rockchip/$DTB#" /boot/armbianEnv.txt
 		else
-			echo 'fdtfile=rockchip/rk3576-rock-4d.dtb' | $SUDO tee -a /boot/armbianEnv.txt >/dev/null
+			echo "fdtfile=rockchip/$DTB" | $SUDO tee -a /boot/armbianEnv.txt >/dev/null
 		fi
 	fi
 }
@@ -124,8 +132,9 @@ install_patched_aic8800(){
 say "Kiln installer — RK3576 NPU on Armbian"
 [ "$(uname -m)" = aarch64 ] || die "aarch64 only (found $(uname -m))"
 [ -f /boot/armbianEnv.txt ] || die "no /boot/armbianEnv.txt — this installer targets Armbian"
-grep -aqi rk3576 /proc/device-tree/compatible 2>/dev/null \
-	|| say "note: board does not report rk3576 in /proc/device-tree/compatible; continuing"
+say "detected SoC: $SOC (board $BOARD, kernel release '$KTAG', dtb $DTB)"
+grep -aqi "$SOC" /proc/device-tree/compatible 2>/dev/null \
+	|| say "note: board does not report $SOC in /proc/device-tree/compatible; continuing"
 
 # --- 1. prerequisites -------------------------------------------------------
 # Heal first: a kernel left half-configured by a DKMS module that won't build on
@@ -208,7 +217,10 @@ echo rknpu | $SUDO tee /etc/modules-load.d/rknpu.conf >/dev/null
 
 # Restore onboard wifi/bt on the mainline kernel (the stock aic8800 doesn't build
 # on 7.1; Kiln's patch does). Best-effort -- the NPU install does not depend on it.
-install_patched_aic8800 "$KREL"
+# aic8800 is the ROCK 4D (RK3576) radio; the ROCK 3B uses a different one, so only
+# run it there.
+[ "$SOC" = rk3576 ] && install_patched_aic8800 "$KREL" \
+	|| say "wifi: skipping aic8800 (only on the ROCK 4D / rk3576)."
 
 # --- 5. NPU device-tree node -------------------------------------------------
 # Nothing to do: on the mainline kernel the vendor NPU node is compiled into the
@@ -239,7 +251,7 @@ fi
 $SUDO install -m0755 buildroot/rootfs/usr/bin/kiln-chat buildroot/rootfs/usr/bin/kiln-vision /usr/bin/
 
 $SUDO mkdir -p /opt/models
-for f in test.jpg imagenet_labels.txt mobilenetv2-12_rk3576.rknn; do
+for f in test.jpg imagenet_labels.txt "$MODEL_RKNN"; do
 	[ -f "model/$f" ] && $SUDO install -m0644 "model/$f" /opt/models/ || true
 done
 
