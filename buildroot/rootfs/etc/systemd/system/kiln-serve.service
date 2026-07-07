@@ -1,0 +1,18 @@
+[Unit]
+Description=Kiln NPU LLM server (OpenAI-compatible API on the RK3576 NPU)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# reads /etc/kiln/config.ini ([server] host/port/model). Override the file with
+# KILN_CONFIG if needed.
+ExecStart=/usr/bin/kiln-serve
+Restart=on-failure
+RestartSec=5
+# the NPU render node + model live on the box; run as root for /dev/dri access
+# (tighten with a 'render' group + supplementary group if you prefer).
+User=root
+
+[Install]
+WantedBy=multi-user.target

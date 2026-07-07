@@ -248,7 +248,21 @@ if [ -f "$DL/rknn_api.h" ]; then
 		-Wl,-rpath-link,"$DL" -lrknnrt -lpthread -lm -o /tmp/rknn_mobilenet \
 	  && $SUDO install -m0755 /tmp/rknn_mobilenet /usr/bin/rknn_mobilenet || say "WARN: rknn_mobilenet build failed"
 fi
+# kiln-serve: OpenAI-compatible API server (LLM). Header-only httplib+json, links
+# the same librkllmrt as kiln-chat. Reuses kiln_llm.h / kiln_config.h.
+if [ -f "$DL/rkllm.h" ] && [ -f "$DL/httplib.h" ] && [ -f "$DL/json.hpp" ]; then
+	g++ -std=c++17 -O2 buildroot/board/rock4d/kiln_serve.cpp -I "$DL" -L "$DL" \
+		-Wl,-rpath-link,"$DL" -lrkllmrt -lpthread -o /tmp/kiln-serve \
+	  && $SUDO install -m0755 /tmp/kiln-serve /usr/bin/kiln-serve || say "WARN: kiln-serve build failed"
+fi
 $SUDO install -m0755 buildroot/rootfs/usr/bin/kiln-chat buildroot/rootfs/usr/bin/kiln-vision /usr/bin/
+# kiln-settings + optional systemd unit for kiln-serve
+[ -f buildroot/rootfs/usr/bin/kiln-settings ] && $SUDO install -m0755 buildroot/rootfs/usr/bin/kiln-settings /usr/bin/ || true
+if [ -f buildroot/rootfs/etc/systemd/system/kiln-serve.service ] && [ -d /etc/systemd/system ]; then
+	$SUDO install -m0644 buildroot/rootfs/etc/systemd/system/kiln-serve.service /etc/systemd/system/
+	$SUDO systemctl daemon-reload 2>/dev/null || true
+	say "kiln-serve.service installed (disabled). Enable with: sudo systemctl enable --now kiln-serve"
+fi
 
 $SUDO mkdir -p /opt/models
 for f in test.jpg imagenet_labels.txt "$MODEL_RKNN"; do

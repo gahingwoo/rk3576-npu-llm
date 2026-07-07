@@ -47,6 +47,14 @@ else
 	wget -qO "$DL/stb_image.h" https://raw.githubusercontent.com/nothings/stb/master/stb_image.h
 fi
 
+# kiln-serve's HTTP + JSON: cpp-httplib and nlohmann/json, both single-header,
+# header-only, no runtime dependency (compile-time only). Pinned tags so the
+# build is reproducible.
+echo "[kiln] fetching httplib.h + json.hpp (kiln-serve OpenAI API server) ..."
+_fetch(){ if command -v curl >/dev/null 2>&1; then curl -fsSL "$1" -o "$2"; else wget -qO "$2" "$1"; fi; }
+_fetch https://raw.githubusercontent.com/yhirose/cpp-httplib/v0.15.3/httplib.h "$DL/httplib.h"
+_fetch https://raw.githubusercontent.com/nlohmann/json/v3.11.3/single_include/nlohmann/json.hpp "$DL/json.hpp"
+
 # librkllmrt.so NEEDs libgomp.so.1 (GNU OpenMP), but the buildroot toolchain is
 # built without OpenMP (# BR2_GCC_ENABLE_OPENMP is not set), so no libgomp exists
 # in it. Stage a glibc libgomp from the host aarch64 cross toolchain; verified it
