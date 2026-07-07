@@ -1,0 +1,67 @@
+From b1c0ffee5a5e4c0de0a0b0c0d0e0f00112233445 Mon Sep 17 00:00:00 2001
+From: Jiaxing Hu <huhuvmb88@outlook.com>
+Date: Mon, 7 Jul 2026 12:00:00 +1200
+Subject: [PATCH] pmdomain/rockchip: survive a stuck power chain on NPU warm
+ power-on
+
+On RK3576 the NPU power domains (NPUTOP -> NPU0/NPU1) are powered on
+cold when the NPU is first used and then power-cycled again every time
+the vendor rknpu driver re-acquires the NPU -- e.g. between two LLM
+chat turns, or on the first use after a warm reboot that did not
+power-cycle the SoC.
+
+On such a WARM power-on the domain memory is still on, so
+rockchip_do_pmu_set_power_domain() calls rockchip_pmu_domain_mem_reset()
+to cycle the domain SRAM. Its first step polls the domain power *chain*
+status, and on this SoC the NPUTOP chain never reports 'on' within the
+10ms timeout:
+
+  rockchip-pm-domain ...: failed to get chain status 'nputop', target_on=1, val=0
+  RKNPU 27700000.npu: failed to get pm runtime for npu0, ret: -110
+
+mem_reset() then returns -ETIMEDOUT, the power-on is aborted, and the
+NPU driver -- which does not expect a powered-domain request to fail --
+goes on to read an NPU core register on the still-unpowered core and the
+CPU takes an asynchronous SError that panics the whole board.
+
+A cold power-on (domain memory off) never runs mem_reset() at all and
+works perfectly, which is exactly the state we want the warm path to
+reach. The SRAM reset is a best-effort scrub; the memory is already
+powered and the rknpu driver re-initialises the block on every power-on.
+So when the chain-status precondition times out, warn and skip the reset
+cycle rather than failing the power-on. The domain then finishes powering
+on through the normal is_on poll, identically to the cold path.
+
+Signed-off-by: Jiaxing Hu <huhuvmb88@outlook.com>
+---
+ drivers/pmdomain/rockchip/pm-domains.c | 12 +++++++++---
+ 1 file changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/pmdomain/rockchip/pm-domains.c b/drivers/pmdomain/rockchip/pm-domains.c
+index 1787f62ba..2b3c4d5e6 100644
+--- a/drivers/pmdomain/rockchip/pm-domains.c
++++ b/drivers/pmdomain/rockchip/pm-domains.c
+@@ -543,10 +543,17 @@ static int rockchip_pmu_domain_mem_reset(struct rockchip_pm_domain *pd)
+ 	ret = readx_poll_timeout_atomic(rockchip_pmu_domain_is_chain_on, pd, is_on,
+ 					is_on == true, 0, 10000);
+ 	if (ret) {
+-		dev_err(pmu->dev,
+-			"failed to get chain status '%s', target_on=1, val=%d\n",
+-			genpd->name, is_on);
+-		goto error;
++		/*
++		 * On a warm power-on (RK3576 NPU re-power) the power chain can
++		 * stay stuck off here forever. The domain memory is already on
++		 * and usable, so skip the optional SRAM reset cycle instead of
++		 * aborting the power-on: a failed power-on would leave the NPU
++		 * driver reading an unpowered core -> async SError / board panic.
++		 */
++		dev_warn_ratelimited(pmu->dev,
++			"chain status '%s' not ready, skipping mem reset\n",
++			genpd->name);
++		return 0;
+ 	}
+
+ 	udelay(20);
+--
+2.43.0

@@ -25,10 +25,16 @@ cannot be shipped as a module.
 | `0005-arm64-dts-rk3576-npu-pd-clocks-biu-reset.patch` | `arm64: dts` | Gives the `power-domain@RK3576_PD_NPU0/1` nodes the full NPU clock set (DSU0 + CBUF gates, not just root/aclk) so every clock runs during the power transition, and adds `resets = <&cru SRST_A_RKNNx_BIU>` for 0002 to pulse. Pairs with 0002. | **yes** |
 | `0003-iommu-rockchip-take-all-dt-clocks.patch` | `iommu/rockchip` | **Driver-only** (split from its old DT hunk): take every DT clock via `devm_clk_bulk_get_all()` instead of the named `aclk`/`iface` pair, so the NPU MMU's extra CBUF/DSU gates run during `rk_iommu_resume` (mainline enables only aclk+iface → the MMU DTE write is silently dropped). Kiln's module also programs the DTE directly, so inference works without it, but this is the correct kernel-side fix. | recommended |
 | `0004-arm64-dts-rk3576-add-vendor-rknpu-node.patch` | `arm64: dts` | Adds the vendor-shaped `npu@27700000` + two v2 IOMMUs to mainline `rk3576.dtsi` and enables it on ROCK 4D with `vdd_npu_s0`. Mainline has **no** NPU compute node (its accel/rocket path uses a different `rknn_core` layout), so this is what the vendor `rknpu` driver binds — the in-tree equivalent of the Armbian DT overlay. | **yes for a mainline build** |
+| `0006-pmdomain-rockchip-npu-warm-power-on-skip-broken-mem-reset.patch` | `pmdomain/rockchip` | The NPU domain powers **cold** on first use (works) but is power-cycled again on every re-acquire — between LLM chat turns, or first use after a warm reboot. A **warm** power-on (domain memory still on) runs `rockchip_pmu_domain_mem_reset()`, whose NPUTOP power-*chain* poll never completes on this SoC → `failed to get chain status 'nputop'` → the power-on aborts with `-110` → the rknpu driver reads an unpowered core → **async SError that panics the board**. Skip the optional SRAM reset when the chain poll times out so the warm path finishes powering on exactly like the (working) cold path. **This is the fix for the second-chat-turn / post-panic-reboot board freeze.** | **yes — the LLM one** |
 
-For a **mainline** build apply **0001 + 0002 + 0003 + 0004 + 0005** (the CI does).
-0001 alone stops the pd-power SError, but the NPU also needs 0002+0005 (BIU reset
-+ full clocks on the power transition) or the first NPU register read SErrors.
+For a **mainline** build apply **0001 + 0002 + 0003 + 0004 + 0005 + 0006** (the CI
+does). 0001 alone stops the pd-power SError, but the NPU also needs 0002+0005 (BIU
+reset + full clocks on the power transition) or the first NPU register read SErrors,
+and **0006** or the NPU wedges the board on the *second* power-on (warm re-power,
+e.g. the next LLM chat turn). 0006 pairs with the driver-side "bail on power-on
+failure" shim in `driver/apply-mainline-shims.sh` (belt and suspenders: 0006 makes
+the warm power-on succeed; the shim makes any *other* power-on failure a clean
+`rkllm init failed` instead of an SError panic).
 
 ## Provenance
 
