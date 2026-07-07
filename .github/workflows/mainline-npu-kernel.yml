@@ -108,6 +108,7 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/out"
           mv linux-image-*.deb linux-headers-*.deb "$GITHUB_WORKSPACE/out/" 2>/dev/null || \
             mv "$KDIR"/../linux-image-*.deb "$KDIR"/../linux-headers-*.deb "$GITHUB_WORKSPACE/out/"
+          rm -f "$GITHUB_WORKSPACE"/out/*-dbg_*.deb   # drop the huge debug-symbol image
           echo "--- built ---"; ls -l "$GITHUB_WORKSPACE/out"
           test -n "$(ls -A "$GITHUB_WORKSPACE"/out 2>/dev/null)" || { echo "no .deb produced"; exit 1; }
 
@@ -125,6 +126,11 @@ jobs:
         run: |
           TAG=kiln-mainline-kernel
           NOTES="Pure mainline linux-${KVER} for Radxa ROCK 4D (RK3576) + Kiln NPU patches (0001 settle-delay, 0003 iommu clocks, 0004 vendor rknpu DT node). bindeb-pkg. Install per MAINLINE-KERNEL.md / kiln-install.sh."
-          gh release view "$TAG" >/dev/null 2>&1 \
-            && gh release upload "$TAG" out/*.deb --clobber \
-            || gh release create "$TAG" out/*.deb --title "Kiln mainline NPU kernel (linux-${KVER})" --notes "$NOTES"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            # clear stale assets first so the installer never picks an old build
+            gh release view "$TAG" --json assets --jq '.assets[].name' \
+              | xargs -r -I{} gh release delete-asset "$TAG" {} -y || true
+            gh release upload "$TAG" out/*.deb --clobber
+          else
+            gh release create "$TAG" out/*.deb --title "Kiln mainline NPU kernel (linux-${KVER})" --notes "$NOTES"
+          fi

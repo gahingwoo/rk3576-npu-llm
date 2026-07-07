@@ -131,7 +131,9 @@ $SUDO apt-get install -y git build-essential dkms device-tree-compiler curl ca-c
 	|| die "apt failed installing prerequisites."
 
 # --- 2. KERNEL PHASE (install the patched kernel once, then reboot) ----------
-on_patched_kernel(){ [ -f "$MARKER" ] && [ "$KREL" = "$(cat "$MARKER" 2>/dev/null)" ]; }
+# on_patched_kernel is true once we're running the Kiln kernel. KILN_FORCE_KERNEL=1
+# forces a re-install even then (e.g. a rebuilt same-version deb with a config fix).
+on_patched_kernel(){ [ -z "${KILN_FORCE_KERNEL:-}" ] && [ -f "$MARKER" ] && [ "$KREL" = "$(cat "$MARKER" 2>/dev/null)" ]; }
 
 if ! on_patched_kernel; then
 	say "installing the Kiln mainline NPU kernel from the '$KTAG' release ..."
