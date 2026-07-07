@@ -100,8 +100,11 @@ jobs:
       - name: Build (bindeb-pkg)
         run: |
           cd "$KDIR"
+          # Unique version per build (date + run number) so a rebuilt kernel is
+          # never mistaken for an already-installed same-version deb -- that
+          # collision silently kept the OLD kernel on the board across a reinstall.
           make -j"$(nproc)" ARCH=arm64 \
-            KDEB_PKGVERSION="$(date -u +%Y%m%d)" bindeb-pkg
+            KDEB_PKGVERSION="$(date -u +%Y%m%d).${GITHUB_RUN_NUMBER}" bindeb-pkg
 
       - name: Collect .deb packages
         run: |

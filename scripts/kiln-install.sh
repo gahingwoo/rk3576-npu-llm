@@ -100,7 +100,13 @@ install_patched_aic8800(){
 	fi
 	$SUDO rm -rf "/usr/src/$pkg-$ver"; $SUDO mkdir -p "/usr/src/$pkg-$ver"
 	$SUDO cp -r "$src/a/src/USB" "/usr/src/$pkg-$ver/"
-	sed "s/#MODULE_VERSION#/$ver/g" "$src/a/debian/aic8800-usb-dkms.dkms" | $SUDO tee "/usr/src/$pkg-$ver/dkms.conf" >/dev/null
+	# Generate dkms.conf from radxa's usb template, but force AUTOINSTALL=no:
+	# with AUTOINSTALL=yes a broken/half-staged aic8800 build makes the kernel
+	# image postinst's 'dkms autoinstall' fail and leaves the kernel
+	# half-configured (blocks apt). We build+install it explicitly below, so it
+	# never needs to ride the kernel's autoinstall.
+	sed -e "s/#MODULE_VERSION#/$ver/g" -e 's/^AUTOINSTALL=.*/AUTOINSTALL=no/' \
+		"$src/a/debian/aic8800-usb-dkms.dkms" | $SUDO tee "/usr/src/$pkg-$ver/dkms.conf" >/dev/null
 	# Firmware: aic_load_fw loads blobs from /lib/firmware/<chip>/ (the chip is
 	# auto-detected, e.g. aic8800D80). Without them the USB bus never comes up
 	# ("bus is not up"). Install the whole USB firmware tree there.
