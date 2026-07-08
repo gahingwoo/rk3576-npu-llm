@@ -43,6 +43,9 @@ pure-mainline 7.1.3 CI kernel):
 **Full serial log** — boot → `rknpu 0.9.8` loads → all four MMU banks enabled →
 MobileNetV2 vision (~161 fps) and Qwen2.5-1.5B chat (9.3 tok/s), both on the NPU:
 [**gist**](https://gist.github.com/gahingwoo/545f90ed2b0e7542e2953e089c60ee01).
+Pure **mainline linux-7.1.3** run (`kiln-chat` with slash commands + `kiln-vision`,
+9 tok/s / 169 fps):
+[**gist**](https://gist.github.com/gahingwoo/abaa95815953b904346b6c74a1c0fc8a).
 
 The core porting problem — and why a naive port only produces `task_counter=0`
 timeouts — is that the NPU is **one device with two IOMMUs**, but mainline

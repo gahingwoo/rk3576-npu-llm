@@ -1,60 +1,83 @@
 # Running Kiln on Armbian
 
-Kiln's NPU-execution work lives entirely in the **out-of-tree module + a device-tree
-overlay** — there are **no kernel source patches**. So it can run on a stock
-Armbian mainline kernel that has RK3576 support (the clock / power-domain /
-rockchip-iommu drivers, upstream since ~6.13), not just the hand-built kernel it
-was developed on.
+Kiln runs on an **Armbian userland** with the **Kiln mainline `linux-7.1.3`
+kernel** — a stock Armbian *kernel* is not enough. Bring-up proved that several
+RK3576 NPU fixes are **kernel code**, not something the module or a DT overlay can
+supply: the power-domain settle delay + BIU reset + cold-start "arm"
+(`kernel-patches/` 0001/0002/0005/0009), the iommu stall/clocks fixes (0003/0007/
+0008), and — the one that makes *repeat* inference work — `regulator-always-on` on
+the NPU rail (0010). Without them the NPU SErrors on the first inference or wedges
+on the second. So the supported path is: install the Kiln kernel (CI publishes it
+as a release), then build the module + runtimes on top.
 
-> **Status:** the driver + overlay are portable by construction, but this exact
-> path has **not yet been tested end-to-end on an Armbian release**. Treat the
-> script as a starting point and check each step. Confirmed working on a
-> hand-built `linux-next` 7.1 image on ROCK 4D (RK3576): matmul runs, tokens come
-> out, ~9 tok/s decode on Qwen2.5-1.5B w4a16.
+`scripts/kiln-install.sh` does exactly this, in two phases (Phase 1 installs the
+kernel and you reboot; Phase 2 builds the driver + tools). The NPU node is built
+into that kernel's DTB, so **no overlay is needed** on this path. (The standalone
+`dts/` overlay — which now also carries the `regulator-always-on` rail fix — is
+only for applying the NPU *device node* to a kernel that already has the code
+fixes, e.g. an Armbian kernel rebuilt with `kernel-patches/` in `userpatches/`.)
+
+> **Status:** verified end-to-end on **pure mainline `linux-7.1.3`** (ROCK 4D,
+> RK3576): `kiln-chat` holds a multi-turn Qwen2.5-1.5B conversation at ~9 tok/s
+> and `kiln-vision` classifies at ~169 fps, both on the NPU. The one-shot script
+> automates the same steps on an Armbian userland.
 
 ## What gets installed
 
 | Piece | Where | How |
 |---|---|---|
+| Kiln mainline `linux-7.1.3` kernel (0001–0010) | `linux-image`/`headers` | CI release `.deb`, `dpkg -i` |
 | `rknpu.ko` (vendor v0.9.8 + Kiln patch) | kernel modules | DKMS (rebuilds on kernel upgrade) |
-| NPU device-tree overlay | `/boot/overlay-user` + `armbianEnv.txt` | `dtc` |
-| `librkllmrt.so` (+ `libgomp`) | `/usr/lib` | fetched |
-| `rkllm_demo`, `kiln-chat` | `/usr/bin` | built / copied |
-| model `*.rkllm` | `/opt/models` | you provide |
+| `librkllmrt.so` / `librknnrt.so` (+ `libgomp`) | `/usr/lib` | fetched |
+| `kiln-chat`, `kiln-vision`, `kiln-serve` | `/usr/bin` | built / copied |
+| model `*.rkllm` / `*.rknn` | `/opt/models` | you provide |
+
+The NPU device node ships **in the Kiln kernel's DTB** (kernel-patches/0004), so
+there is no overlay to install on this path.
 
 ## Prerequisites
 
-- Armbian aarch64 with a **mainline** kernel ≥ 6.13 that has RK3576 support
-  (Armbian "edge"/current for `rock-4d`). Its base DT does **not** need NPU nodes —
-  the overlay adds them — but must export the symbols `cru`, `power`, `vdd_npu_s0`
-  (the ROCK 4D DT does; check `ls /proc/device-tree/__symbols__/`).
-- The kernel **headers** package for the running kernel. On Armbian it is named by
-  branch, not version: `sudo apt install linux-headers-$(uname -r | sed -E 's/^[0-9.]+-//')`
-  (e.g. `linux-headers-edge-rockchip64`), plus `dkms device-tree-compiler git build-essential`.
+- Armbian aarch64 for ROCK 4D (RK3576). The installer replaces the kernel with the
+  Kiln mainline `linux-7.1.3` build, so the starting Armbian kernel branch does not
+  matter much; you need working `apt`, `dkms`, `device-tree-compiler`, `git`,
+  `build-essential`, and network at install time.
 - A version-matched `librkllmrt` (Kiln pins **1.2.0**) + a `*-rk3576-w4a16.rkllm`, and/or
   a `librknnrt`-matched (**2.3.0**) `*_rk3576.rknn` for vision.
+- Note: moving to the mainline kernel can drop Wi-Fi (the aic8800 driver); the
+  installer rebuilds a patched aic8800 via DKMS, but keep Ethernet handy.
 
-## One-shot install
+## One-shot install (two phases)
 
 ```sh
+# PHASE 1 -- installs the Kiln mainline kernel, then asks you to reboot into it
+curl -fsSL https://raw.githubusercontent.com/gahingwoo/kiln/main/scripts/kiln-install.sh | bash
+sudo reboot
+
+# after reboot, confirm you are on the Kiln kernel, then run PHASE 2
+uname -r                              # expect a 7.1.3 build
 curl -fsSL https://raw.githubusercontent.com/gahingwoo/kiln/main/scripts/kiln-install.sh | bash
 # copy your models into /opt/models (a *-rk3576-w4a16.rkllm and/or a *_rk3576.rknn)
-sudo reboot
 kiln-vision /opt/models/test.jpg     # or: kiln-chat
 ```
 
-It bootstraps the prerequisites, builds the driver with DKMS (so the vermagic
-matches the running kernel), installs the overlay, and installs the runtimes +
-demos. Re-runnable.
+It installs the Kiln kernel (Phase 1), then builds the driver with DKMS (so the
+vermagic matches the running kernel) and installs the runtimes + tools (Phase 2).
+Re-runnable.
 
-## What the overlay does
+## The standalone overlay (alternative path)
 
-`dts/rk3576-rock-4d-kiln-npu.dtso` is **self-contained**: it adds the vendor-shaped
-`npu@27700000` plus its two v2 IOMMUs (`@27702000` / `@2770a000`) from scratch,
-referencing only `&cru`, `&power`, `&vdd_npu_s0`, with **numeric** clock/reset/power
-IDs so it builds with plain `dtc` (no dt-bindings headers). The prebuilt `.dtbo`
-ships in the repo; it's copied to `/boot/overlay-user/kiln-npu.dtbo` and enabled via
-`user_overlays=kiln-npu` in `/boot/armbianEnv.txt`.
+`dts/rk3576-rock-4d-kiln-npu.dtso` is **not used** by the install above (the NPU
+node is already in the Kiln kernel's DTB). It exists for the case where you rebuild
+an Armbian kernel with `kernel-patches/` applied but do not change its board DTB:
+the overlay then adds the vendor-shaped `npu@27700000` plus its two v2 IOMMUs
+(`@27702000` / `@2770a000`) from scratch, referencing only `&cru`, `&power`,
+`&vdd_npu_s0` with **numeric** IDs so it builds with plain `dtc`, and it sets
+`regulator-always-on` on `vdd_npu_s0` (the overlay equivalent of 0010, without
+which the NPU works once and then hangs). Copy the prebuilt `.dtbo` to
+`/boot/overlay-user/kiln-npu.dtbo` and add `user_overlays=kiln-npu` to
+`/boot/armbianEnv.txt`. The overlay only supplies the *DT node* — it cannot supply
+the pmdomain/iommu code fixes, which is why the kernel itself must carry
+`kernel-patches/`.
 
 ## Verify
 
@@ -68,11 +91,17 @@ kiln-chat                       # chat; each turn prints a [bench] tok/s line
 
 ## If the NPU doesn't come up
 
+- **Not on the Kiln kernel** — `uname -r` must show the 7.1.3 build. If Phase 1
+  did not switch the kernel (u-boot still boots the old one), re-run Phase 1 and
+  check `/boot/armbianEnv.txt` / extlinux points at the Kiln `linux-image`.
 - **No `renderD*` / module won't load** — vermagic mismatch: the DKMS build must
   target the *running* kernel's headers. `sudo dkms status`, rebuild against
   `linux-headers-$(uname -r)`.
-- **Overlay not applied** — check `armbianEnv.txt user_overlays=` and that the
-  `.dtbo` is in the dir Armbian reads; `cat /proc/device-tree/soc/npu@27700000/status`.
+- **Works once, then the second inference hangs the board** — the NPU rail
+  (`vdd_npu_s0`) dropped. On the Kiln kernel this is fixed by 0010
+  (`regulator-always-on`); confirm `dmesg | grep vdd_npu` shows **no**
+  `vdd_npu_s0: disabling`. On the overlay path, confirm the overlay carries the
+  `regulator-always-on` fragment.
 - **Jobs time out (`task_counter=0`)** — confirm the `kiln mmu enable_all` line
   shows `st=0x19/0x19/0x19/0x19`; if a bank is `0x18` the overlay/driver pairing
   is off. See `driver/patches/README.md` for the mechanism.

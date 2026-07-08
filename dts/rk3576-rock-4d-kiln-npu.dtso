@@ -85,3 +85,15 @@
 		status = "okay";
 	};
 };
+
+/*
+ * Keep the NPU rail powered. vdd_npu_s0 is only regulator-boot-on in the base
+ * DT, so the regulator core disables it ~30 s into boot once the driver balances
+ * its enable/disable; the genpd domain still reports "on", so the SECOND NPU
+ * inference reads a register on a dead rail and wedges the board (works once,
+ * then hangs). regulator-always-on holds the rail so every NPU use lands on a
+ * live core. This is the overlay equivalent of kernel-patches/0010.
+ */
+&vdd_npu_s0 {
+	regulator-always-on;
+};
