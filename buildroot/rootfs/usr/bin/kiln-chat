@@ -1,8 +1,8 @@
 #!/bin/sh
 # Kiln: chat with an LLM on the RK3576 NPU (librkllmrt). Config-driven -- model,
 # context, sampling, system prompt and KV history come from /etc/kiln/config.ini
-# (edit with `kiln-settings`). Any extra args are forwarded to the binary
-# (old form still works: kiln-chat <model.rkllm> [new_tokens] [ctx]).
+# (edit by hand; kiln-chat also has live slash commands -- type /help). Extra args
+# are forwarded to the binary (old form still works: kiln-chat <model.rkllm> [new_tokens] [ctx]).
 export LD_LIBRARY_PATH=/usr/lib
 
 # ensure the vendor rknpu driver is loaded (normally auto-loaded at boot via
