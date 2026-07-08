@@ -4,7 +4,8 @@ Run **LLM and vision** inference on the **Rockchip RK3576 NPU** under a
 **mainline** Linux kernel (7.x), by building the vendor GPL `rknpu` driver
 **out-of-tree** and driving it with the closed `librkllmrt` (RKLLM, LLMs) and
 `librknnrt` (RKNN, CNN vision) runtimes. Exposed as an integrable local service:
-an **OpenAI-compatible API** (`kiln-serve`) plus a unified config (`kiln-settings`).
+an **OpenAI-compatible API** (`kiln-serve`) plus a slash-command chat CLI over one
+config file.
 
 The vendor RKLLM/RKNN stack runs multi-matmul LLMs and convolutional vision on
 RK3576 — but on the vendor 6.1 BSP kernel. Kiln puts that same stack (vendor
@@ -82,7 +83,7 @@ version-matched to `librknnrt` — same model/runtime lock as RKLLM.)
 
 ## Serve & configure
 
-Kiln is an **integrable local NPU service**, not just a demo. Four tools, one
+Kiln is an **integrable local NPU service**, not just a demo. Three tools, one
 config (`/etc/kiln/config.ini`, read by all of them):
 
 - **`kiln-serve`** — an **OpenAI-compatible** HTTP API for the LLM. Point the
@@ -99,11 +100,15 @@ config (`/etc/kiln/config.ini`, read by all of them):
   `kiln-chat` — no re-implemented inference — and is header-only
   (`cpp-httplib` + `nlohmann/json`, no Python). Runs standalone or as a
   `systemd` service. See [`docs/SERVER.md`](docs/SERVER.md).
-- **`kiln-settings`** — one interactive editor for the whole stack: LLM
-  (model / system prompt / context / sampling / KV-cache history), vision
-  (model / labels / top-N / NPU core mask / priority), and the API server. Only
-  fields the closed runtimes actually expose. See [`docs/CONFIG.md`](docs/CONFIG.md).
-- **`kiln-chat`** / **`kiln-vision`** — the CLIs, now also config-driven.
+- **`kiln-chat`** — the interactive LLM CLI, with **slash commands** to manage
+  the session: `/model` to list or switch models, `/system` to set the system
+  prompt, `/history` for multi-turn memory, `/clear` / `/new`, `/compact` to
+  summarize a long conversation, `/context`. Type `/help`. See
+  [`docs/CHAT.md`](docs/CHAT.md).
+- **`kiln-vision`** — the image-classification CLI.
+
+All three read `/etc/kiln/config.ini` (edit it by hand — the fields are the ones
+the closed runtimes actually expose; see [`docs/CONFIG.md`](docs/CONFIG.md)).
 
 ## Build
 
@@ -149,11 +154,11 @@ guessed open-driver layout.
 - `Kbuild`, `Makefile`, `dkms.conf` — out-of-tree module build (DRM_GEM path; DKMS)
 - `buildroot/board/rock4d/` — the tools' sources: `kiln_config.h` (unified config),
   `kiln_llm.h` / `kiln_vision.h` (runtime wrappers), `kiln_serve.cpp` (API server),
-  `kiln_settings.cpp`, `rkllm_chat.cpp` / `rknn_mobilenet.cpp` (CLIs)
+  `rkllm_chat.cpp` (slash-command chat CLI) / `rknn_mobilenet.cpp` (vision CLI)
 - `kernel-patches/` — RK3576 NPU pmdomain/iommu/DT patches (mainline build)
 - `kernel-patches-rk3568/` — RK3568 (ROCK 3B) NPU patches (untested; see `RK3568.md`)
 - `capture/` — NPU per-op capture + the rocket cold-start-arm breakthrough probe
-- `docs/SERVER.md`, `docs/CONFIG.md` — kiln-serve API + kiln-settings reference
+- `docs/SERVER.md`, `docs/CHAT.md`, `docs/CONFIG.md` — kiln-serve API, kiln-chat slash commands, config reference
 - `scripts/kiln-install.sh` — one-shot installer (mainline kernel + module + tools)
 - `ARMBIAN.md`, `MAINLINE-KERNEL.md` — kernel paths
 - `VISION.md` — MobileNet / RKNN image inference (the CNN control experiment)

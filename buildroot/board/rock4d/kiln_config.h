@@ -2,7 +2,8 @@
 // kiln_config.h -- one config for the whole Kiln stack (kiln-chat, kiln-vision,
 // kiln-serve). Tiny INI reader/writer, no dependency. All three binaries read
 // the SAME file (default /etc/kiln/config.ini, override with $KILN_CONFIG) so
-// nothing is hard-coded per tool. kiln-settings writes it.
+// nothing is hard-coded per tool. Edit it by hand; kiln-chat can also change the
+// LLM knobs live via slash commands (/model, /system, /history).
 //
 // Only fields the closed runtimes actually expose are here:
 //   LLM  (librkllmrt): model, context/new-tokens, sampling, system prompt,
@@ -69,7 +70,7 @@ inline std::string trim(const std::string &s) {
 }
 
 // Load config from `path` into `c`. Missing file / missing keys keep defaults,
-// so a fresh box works before kiln-settings has ever run. Returns true if the
+// so a fresh box works before any config file is written. Returns true if the
 // file existed and was read.
 inline bool load(KilnConfig &c, const std::string &path = config_path()) {
     std::ifstream f(path);
@@ -117,7 +118,7 @@ inline bool save(const KilnConfig &c, const std::string &path = config_path()) {
     std::ofstream f(path);
     if (!f) return false;
     f << "# Kiln unified config -- read by kiln-chat, kiln-vision, kiln-serve.\n"
-         "# Edit with `kiln-settings` (or by hand). Only runtime-settable fields.\n\n";
+         "# Edit by hand; kiln-chat can also change the LLM knobs live (/help). Only runtime-settable fields.\n\n";
     f << "[llm]\n";
     f << "model = "             << c.llm_model << "\n";
     f << "max_context_len = "   << c.llm_max_context_len << "\n";

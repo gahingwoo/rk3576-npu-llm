@@ -63,14 +63,25 @@ public:
         int ret = rkllm_init(&h_, &param, kiln_llm_callback);
         if (ret != 0) return ret;
 
-        // ChatML markers are the Qwen model format; only the system-prompt
-        // CONTENT is user-configurable (an empty system prompt makes Qwen
-        // misidentify itself). prefix/postfix stay the ChatML constants.
-        std::string sys = "<|im_start|>system\n" + cfg.llm_system_prompt + "<|im_end|>\n";
-        rkllm_set_chat_template(h_, sys.c_str(),
-                                "<|im_start|>user\n",
-                                "<|im_end|>\n<|im_start|>assistant\n");
+        apply_chat_template(cfg.llm_system_prompt);
         return 0;
+    }
+
+    // Reload a different model at runtime (/model switch). Destroys the current
+    // handle and re-inits from cfg -- the caller warns the user about the load
+    // delay. Returns rkllm_init's code (0 on success). CLI-only (single thread).
+    int reinit(const KilnConfig &cfg) {
+        { std::lock_guard<std::mutex> lk(mu_); if (h_) { rkllm_destroy(h_); h_ = nullptr; } }
+        return init(cfg);
+    }
+
+    // Replace the system prompt at runtime (/system). Re-applies the ChatML
+    // template with the new content and clears the KV cache so the old system
+    // prompt is dropped and the new one takes effect from a fresh context.
+    void set_system_prompt(const std::string &sys) {
+        std::lock_guard<std::mutex> lk(mu_);
+        cfg_.llm_system_prompt = sys;
+        if (h_) { apply_chat_template(sys); rkllm_clear_kv_cache(h_, 0); }
     }
 
     // Generate for one prompt. keep_history overrides the config default (the
@@ -112,6 +123,17 @@ public:
     ~KilnLLM() { if (h_) rkllm_destroy(h_); }
 
 private:
+    // Install the Qwen ChatML template with the given system-prompt CONTENT.
+    // ChatML markers are the model format; only the content is user-facing (an
+    // empty system prompt makes Qwen misidentify itself). Not locked -- callers
+    // that need the mutex take it themselves; init() runs before any threads.
+    void apply_chat_template(const std::string &sys) {
+        std::string s = "<|im_start|>system\n" + sys + "<|im_end|>\n";
+        rkllm_set_chat_template(h_, s.c_str(),
+                                "<|im_start|>user\n",
+                                "<|im_end|>\n<|im_start|>assistant\n");
+    }
+
     LLMHandle h_ = nullptr;
     KilnConfig cfg_;
     std::string model_;   // backs param.model_path across init()

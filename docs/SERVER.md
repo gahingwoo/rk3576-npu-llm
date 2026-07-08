@@ -80,8 +80,8 @@ for chunk in client.chat.completions.create(
 
 ## Configuration
 
-All defaults come from `[server]` and `[llm]` in `/etc/kiln/config.ini` — set
-them with [`kiln-settings`](CONFIG.md). `[server].llm_model` (blank = use
+All defaults come from `[server]` and `[llm]` in `/etc/kiln/config.ini` — edit
+it by hand (see [`CONFIG.md`](CONFIG.md)). `[server].llm_model` (blank = use
 `[llm].model`) picks which `.rkllm` the server loads; the sampling / context /
 system-prompt come from `[llm]`.
 

@@ -255,9 +255,6 @@ if [ -f "$DL/rkllm.h" ] && [ -f "$DL/httplib.h" ] && [ -f "$DL/json.hpp" ]; then
 		-Wl,-rpath-link,"$DL" -lrkllmrt -lrknnrt -lpthread -lm -o /tmp/kiln-serve \
 	  && $SUDO install -m0755 /tmp/kiln-serve /usr/bin/kiln-serve || say "WARN: kiln-serve build failed"
 fi
-# kiln-settings: interactive unified config editor (no runtime deps).
-g++ -std=c++17 -O2 buildroot/board/rock4d/kiln_settings.cpp -I "$DL" -o /tmp/kiln-settings \
-  && $SUDO install -m0755 /tmp/kiln-settings /usr/bin/kiln-settings || say "WARN: kiln-settings build failed"
 $SUDO install -m0755 buildroot/rootfs/usr/bin/kiln-chat buildroot/rootfs/usr/bin/kiln-vision /usr/bin/
 # NPU keep-resident: a sysfs power/control=on (via udev on rknpu bind) so the NPU
 # never autosuspends -- avoids the CPU-DVFS -110 wedge AND the warm-power dead core.
@@ -281,7 +278,7 @@ done
 
 # Seed the unified config (if absent) so kiln-chat/vision/serve/settings share
 # one source of truth. The tools also work with no file (built-in defaults);
-# this just makes the vision model SoC-correct and gives kiln-settings a start.
+# this just makes the vision model SoC-correct and seeds a working config.
 $SUDO mkdir -p /etc/kiln
 if [ ! -f /etc/kiln/config.ini ]; then
 	# RK3568 is a vision target (LLM impractical) -> no LLM model by default;
@@ -292,7 +289,7 @@ if [ ! -f /etc/kiln/config.ini ]; then
 	esac
 	$SUDO tee /etc/kiln/config.ini >/dev/null <<EOF
 # Kiln unified config -- read by kiln-chat, kiln-vision, kiln-serve.
-# Edit with \`kiln-settings\` (or by hand). Only runtime-settable fields.
+# Edit by hand; kiln-chat can also change the LLM knobs live (/help). Only runtime-settable fields.
 
 [llm]
 model = $LLM_MODEL
@@ -315,7 +312,7 @@ priority = high
 host = 0.0.0.0
 port = 8080
 EOF
-	say "wrote default /etc/kiln/config.ini (edit with kiln-settings)"
+	say "wrote default /etc/kiln/config.ini (edit by hand; kiln-chat /help for live LLM knobs)"
 fi
 
 # --- 7. finish --------------------------------------------------------------

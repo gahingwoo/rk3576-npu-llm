@@ -1,17 +1,15 @@
-# kiln-settings — unified configuration
+# Kiln configuration
 
 Kiln keeps one config, `/etc/kiln/config.ini`, read by **every** tool
 (`kiln-chat`, `kiln-vision`, `kiln-serve`). Nothing is hard-coded per tool.
-Edit it interactively with `kiln-settings`, or by hand.
+Edit it by hand — it is a plain INI file. `kiln-install.sh` seeds a working
+default, so a fresh box runs without touching it.
 
-```sh
-kiln-settings          # prompts through [llm] / [vision] / [server]; Enter keeps a value
-sudo kiln-settings     # if /etc/kiln/config.ini is root-owned
-```
-
-Model fields scan the model directory and let you pick a `.rkllm` / `.rknn` by
-number (or type a path). At the end it can enable/disable the `kiln-serve`
-systemd service.
+For the LLM you usually do not need to edit the file at all: `kiln-chat` can
+change the live knobs with slash commands — `/model` to switch model, `/system`
+to set the system prompt, `/history` for multi-turn memory (see
+[`CHAT.md`](CHAT.md)). Those changes apply to the running session; put anything
+you want to persist across restarts into the file.
 
 ## What is settable — and what is not
 
@@ -82,5 +80,5 @@ port = 8080
 ```
 
 The tools also run with **no** config file (built-in defaults), so a fresh box
-works before `kiln-settings` is ever run; `kiln-install.sh` seeds a default with
+works before the file is ever written; `kiln-install.sh` seeds a default with
 the SoC-correct vision model.
