@@ -317,6 +317,7 @@ max_new_tokens = 512
 temperature = 0.7
 top_k = 1
 top_p = 0.8
+repeat_penalty = 1.3
 keep_history = 1
 system_prompt = You are Qwen, created by Alibaba Cloud. You are a helpful assistant. Always reply in the same language the user writes in.
 
