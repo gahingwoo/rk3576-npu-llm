@@ -39,19 +39,17 @@ cp "$RKNN_API/aarch64/librknnrt.so" "$DL/librknnrt.so"
 cp "$RKNN_API/include/rknn_api.h" "$DL/rknn_api.h"
 
 # stb_image.h (public domain, single header) decodes the input JPEG/PNG in the
-# vision demo without pulling in a full image library.
+# vision demo without pulling in a full image library. Skip if already fetched
+# (idempotent -- avoids re-downloading and GitHub raw rate-limits on rebuilds).
+_fetch(){ [ -s "$2" ] && { echo "[kiln] have $(basename "$2")"; return 0; };
+          if command -v curl >/dev/null 2>&1; then curl -fsSL "$1" -o "$2"; else wget -qO "$2" "$1"; fi; }
 echo "[kiln] fetching stb_image.h (image decoder for the vision demo) ..."
-if command -v curl >/dev/null 2>&1; then
-	curl -fsSL https://raw.githubusercontent.com/nothings/stb/master/stb_image.h -o "$DL/stb_image.h"
-else
-	wget -qO "$DL/stb_image.h" https://raw.githubusercontent.com/nothings/stb/master/stb_image.h
-fi
+_fetch https://raw.githubusercontent.com/nothings/stb/master/stb_image.h "$DL/stb_image.h"
 
 # kiln-serve's HTTP + JSON: cpp-httplib and nlohmann/json, both single-header,
 # header-only, no runtime dependency (compile-time only). Pinned tags so the
 # build is reproducible.
 echo "[kiln] fetching httplib.h + json.hpp (kiln-serve OpenAI API server) ..."
-_fetch(){ if command -v curl >/dev/null 2>&1; then curl -fsSL "$1" -o "$2"; else wget -qO "$2" "$1"; fi; }
 _fetch https://raw.githubusercontent.com/yhirose/cpp-httplib/v0.15.3/httplib.h "$DL/httplib.h"
 _fetch https://raw.githubusercontent.com/nlohmann/json/v3.11.3/single_include/nlohmann/json.hpp "$DL/json.hpp"
 
