@@ -8,7 +8,7 @@ set -euo pipefail
 BINARIES="${BINARIES_DIR:-${1:?missing binaries dir}}"
 ROCKCHIP_BIN="${ROCKCHIP_BINARIES:?set ROCKCHIP_BINARIES to your rock4d u-boot dir}"
 OUT="${BINARIES}/sdcard.img"
-DTB="rk3576-rock-4d-kiln.dtb"
+DTB="${KILN_DTB:-rk3576-rock-4d-kiln.dtb}"
 
 UBOOT_IMG="${UBOOT_IMG:-${ROCKCHIP_BIN}/rock4d-sd-uboot.img}"
 UBOOT_MB=16

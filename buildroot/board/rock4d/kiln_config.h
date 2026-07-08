@@ -28,7 +28,7 @@ struct KilnConfig {
     float       llm_frequency_penalty= 0.0f;
     float       llm_presence_penalty = 0.0f;
     int         llm_embed_flash      = 1;    // query word-embeddings from flash
-    int         llm_keep_history     = 0;    // 1 = multi-turn KV retained, 0 = single-turn
+    int         llm_keep_history     = 1;    // 1 = multi-turn KV retained (default), 0 = single-turn
     int         llm_n_keep           = -1;   // KV tokens kept on context shift; -1 = runtime default
     // single-line system-prompt CONTENT; kiln_llm wraps it in the ChatML markers.
     std::string llm_system_prompt    =

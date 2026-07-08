@@ -47,8 +47,11 @@ cp "$BASE_CONFIG" "$EXT/dl/base.config"
 "$EXT/fetch-runtimes.sh"
 
 # 3. fetch + shim the GPL rknpu driver (build happens in post-build against the
-#    kernel buildroot builds). Safe to run now; idempotent.
-"$KILN/driver/fetch-vendor-driver.sh"
+#    kernel buildroot builds). Skip if already fetched+shimmed so in-tree edits
+#    (e.g. bring-up diagnostics) survive a rebuild; force with KILN_REFETCH=1.
+if [ -n "${KILN_REFETCH:-}" ] || [ ! -f "$KILN/driver/rknpu/rknpu_drv.c" ]; then
+	"$KILN/driver/fetch-vendor-driver.sh"
+fi
 
 # 4. point buildroot's kernel at the patched linux-next tree (rsync'd, read-only safe)
 cat > "$OUT/local.mk" <<EOF
@@ -56,7 +59,8 @@ LINUX_OVERRIDE_SRCDIR = $KERNEL_SRC
 EOF
 
 # 5. configure + build
-make -C "$BR_SRC" O="$OUT" BR2_EXTERNAL="$EXT" kiln_rock4d_defconfig
+make -C "$BR_SRC" O="$OUT" BR2_EXTERNAL="$EXT" ${DEFCONFIG:-kiln_rock4d_defconfig}
+[ -n "${KILN_LINUX_REBUILD:-}" ] && make -C "$BR_SRC" O="$OUT" linux-dirclean || true
 echo "==> building (first run compiles the toolchain + kernel; ~40-90 min)"
 make -C "$BR_SRC" O="$OUT"
 
