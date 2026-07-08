@@ -18,6 +18,7 @@
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
+#include <cctype>
 #include <mutex>
 
 // Per-run routing context handed to the C callback via rkllm_run()'s userdata.
@@ -38,17 +39,21 @@ static inline bool kiln_is_role_label(const std::string &s) {
            s == "assistant" || s == "user" || s == "human" || s == "system";
 }
 
-// Qwen2.5 ChatML turn/END token IDs: <|endoftext|>=151643, <|im_end|>=151645.
-// ROOT CAUSE of "never stops": this RKLLM build does NOT flag Qwen's added
-// special tokens as special, so <|im_end|> is neither treated as EOS nor skipped
-// -- it is detokenized as ordinary vocab text (observed as "IBAction") and
-// generation runs on to max_new_tokens. Detecting the *text* "<|im_end|>" cannot
-// work (it never appears as that string); the token ID is decoding-independent,
-// so we stop on the ID. Confirm the IDs on hardware with KILN_DEBUG_TOKENS=1.
-static inline bool kiln_is_stop_id(int32_t id) { return id == 151643 || id == 151645; }
+// Turn/END token IDs, by family (this RKLLM build may not flag them special, so
+// it neither stops nor skips them -- it detokenizes them to ordinary text and
+// runs to max_new_tokens; stopping on the ID is decoding-independent). The two
+// families' IDs do not overlap, so a union check is safe across models:
+//   Qwen2.5 ChatML : <|endoftext|>=151643, <|im_end|>=151645
+//   Llama-3        : <|end_of_text|>=128001, <|eot_id|>=128009
+// Confirm on hardware with KILN_DEBUG_TOKENS=1.
+static inline bool kiln_is_stop_id(int32_t id) {
+    return id == 151643 || id == 151645 || id == 128001 || id == 128009;
+}
 
-// Text fallback, in case a build DOES decode the marker to a string.
-static const char *const KILN_STOP_MARKERS[] = { "<|im_end|>", "<|endoftext|>", "<|im_start|>" };
+// Text fallback, in case a build DOES decode a marker to a string.
+static const char *const KILN_STOP_MARKERS[] = {
+    "<|im_end|>", "<|endoftext|>", "<|im_start|>", "<|eot_id|>", "<|end_of_text|>", "<|start_header_id|>"
+};
 
 // Single C callback for rkllm_init; routes each result to the run's context.
 static void kiln_llm_callback(RKLLMResult *result, void *userdata, LLMCallState state) {
@@ -189,15 +194,26 @@ public:
     ~KilnLLM() { if (h_) rkllm_destroy(h_); }
 
 private:
-    // Install the Qwen ChatML template with the given system-prompt CONTENT.
-    // ChatML markers are the model format; only the content is user-facing (an
-    // empty system prompt makes Qwen misidentify itself). Not locked -- callers
-    // that need the mutex take it themselves; init() runs before any threads.
+    // Install the chat template for the loaded model with the given system-prompt
+    // CONTENT. The MARKERS are the model's format and must match the model, or it
+    // drifts / mis-stops; only the content is user-facing. Family is picked from
+    // the model filename (Llama uses header-id/eot markers, Qwen/default ChatML).
+    // Not locked -- callers that need the mutex take it themselves; init() runs
+    // before any threads.
     void apply_chat_template(const std::string &sys) {
-        std::string s = "<|im_start|>system\n" + sys + "<|im_end|>\n";
-        rkllm_set_chat_template(h_, s.c_str(),
-                                "<|im_start|>user\n",
-                                "<|im_end|>\n<|im_start|>assistant\n");
+        std::string lower = cfg_.llm_model;
+        for (char &c : lower) c = (char)tolower((unsigned char)c);
+        std::string system, prefix, postfix;
+        if (lower.find("llama") != std::string::npos) {           // Llama-3 format
+            system  = "<|start_header_id|>system<|end_header_id|>\n\n" + sys + "<|eot_id|>";
+            prefix  = "<|start_header_id|>user<|end_header_id|>\n\n";
+            postfix = "<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n";
+        } else {                                                  // Qwen / default ChatML
+            system  = "<|im_start|>system\n" + sys + "<|im_end|>\n";
+            prefix  = "<|im_start|>user\n";
+            postfix = "<|im_end|>\n<|im_start|>assistant\n";
+        }
+        rkllm_set_chat_template(h_, system.c_str(), prefix.c_str(), postfix.c_str());
     }
 
     LLMHandle h_ = nullptr;
