@@ -154,8 +154,11 @@ norm "$T/trace" > "$OUT"
 echo "  -> $(wc -l < "$OUT") unique env events -> $OUT"
 echo
 echo "=== highlight: NPU-relevant env writes (regmap/iommu/genpd/npu/grf; CPU clk dropped) ==="
+# no head-cap: a truncated + sorted highlight drops whole address ranges (e.g.
+# qos@27f08.. after qos@27f04..) and makes a log-based diff look artificially
+# different. The authoritative comparison is `kiln-env-trace diff` on the full file.
 grep -aiE 'regmap_reg_write|iommu|power-management|npu|grf|pvtpll|repair' "$OUT" \
-	| grep -avE "$NOISE" | head -60 || true
+	| grep -avE "$NOISE" || true
 echo
 echo "next: capture the OTHER mode too, then diff ON THE BOARD (survives reboot):"
 echo "  # kiln mode:   kiln-env-trace kiln"
