@@ -88,24 +88,13 @@ else
 	echo "[kiln] LLM model NOT baked in; scp it to /opt/models on the board"
 fi
 
-# --- auto-load rknpu at boot + pin the NPU resident -------------------------
-# modprobe binds rknpu (cold power-on -> the 0009 pd_power arm reads base+0x0 and
-# arms the core). Then pin runtime-PM ON immediately so the NPU never autosuspends
-# -- a warm re-power on mainline fails ('failed to set domain nputop on' -> -110
-# -> SError). buildroot's init doesn't run udev rules, so the keep-resident is
-# done right here (the Armbian path uses the 99-kiln-npu-keepon.rules udev rule).
+# --- auto-load rknpu at boot ------------------------------------------------
+# modprobe binds rknpu; the cold power-on runs the 0009 pd_power arm and the NPU
+# rail stays up via 0010 (regulator-always-on), so no keep-resident hack is needed.
 install -D -m0755 /dev/stdin "$TARGET_DIR/etc/init.d/S89rknpu" <<'INIT'
 #!/bin/sh
 case "$1" in
-	start)
-		modprobe rknpu 2>/dev/null || true
-		for f in $(find /sys/devices -path '*.npu/power/control' 2>/dev/null); do
-			echo on > "$f" 2>/dev/null || true
-		done
-		for f in $(find /sys/devices -path '*.npu/power/autosuspend_delay_ms' 2>/dev/null); do
-			echo 120000 > "$f" 2>/dev/null || true
-		done
-		;;
+	start) modprobe rknpu 2>/dev/null || true ;;
 	stop)  : ;;
 esac
 INIT

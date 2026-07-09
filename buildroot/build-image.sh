@@ -4,16 +4,16 @@
 #
 # Reuses the rocket tree's buildroot SOURCE (br-src) and the kernel tree that
 # already carries the RK3576 IOMMU/PD/clock platform patches. No source under
-# /home/parallels is modified: rocket is turned OFF by the Kiln kernel fragment,
-# and the rocket NPU DT nodes are removed at the DT level by the Kiln board DTS
-# (dts/rk3576-rock-4d-kiln.dts) via BR2_LINUX_KERNEL_CUSTOM_DTS_PATH.
+# The NPU compute node is in the kernel DTB via kernel-patches/0004 (the KERNEL_SRC
+# tree must have kernel-patches/ 0001-0010 applied); the 713 defconfig builds the
+# in-tree rockchip/rk3576-rock-4d dtb, no custom DTS.
 #
 # Edit the four paths below to match your machine, then run this script.
 set -euo pipefail
 
 # ---- paths you must set -----------------------------------------------------
 BR_SRC="${BR_SRC:-/home/parallels/Desktop/linux-rk3576-npu/buildroot/br-src}"        # buildroot source
-KERNEL_SRC="${KERNEL_SRC:-/home/parallels/Desktop/rock4d_package/kernel-build/linux-next}" # linux-next w/ platform patches
+KERNEL_SRC="${KERNEL_SRC:-/home/parallels/Desktop/kiln-713/linux-7.1.3}"             # mainline 7.1.3 + kernel-patches/ 0001-0010
 BASE_CONFIG="${BASE_CONFIG:-/home/parallels/Desktop/linux-rk3576-npu/kernel/base.config}"  # kernel .config base
 ROCKCHIP_BINARIES="${ROCKCHIP_BINARIES:-/home/parallels/Desktop/rock4d_package/binaries}"   # rock4d u-boot dir
 # -----------------------------------------------------------------------------
@@ -59,7 +59,7 @@ LINUX_OVERRIDE_SRCDIR = $KERNEL_SRC
 EOF
 
 # 5. configure + build
-make -C "$BR_SRC" O="$OUT" BR2_EXTERNAL="$EXT" ${DEFCONFIG:-kiln_rock4d_defconfig}
+make -C "$BR_SRC" O="$OUT" BR2_EXTERNAL="$EXT" ${DEFCONFIG:-kiln_rock4d_713_defconfig}
 [ -n "${KILN_LINUX_REBUILD:-}" ] && make -C "$BR_SRC" O="$OUT" linux-dirclean || true
 echo "==> building (first run compiles the toolchain + kernel; ~40-90 min)"
 make -C "$BR_SRC" O="$OUT"

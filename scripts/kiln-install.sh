@@ -279,14 +279,6 @@ if [ -f "$DL/rkllm.h" ] && [ -f "$DL/httplib.h" ] && [ -f "$DL/json.hpp" ]; then
 	  && $SUDO install -m0755 /tmp/kiln-serve /usr/bin/kiln-serve || say "WARN: kiln-serve build failed"
 fi
 $SUDO install -m0755 buildroot/rootfs/usr/bin/kiln-chat buildroot/rootfs/usr/bin/kiln-vision /usr/bin/
-# NPU keep-resident: a sysfs power/control=on (via udev on rknpu bind) so the NPU
-# never autosuspends -- avoids the CPU-DVFS -110 wedge AND the warm-power dead core.
-$SUDO install -m0755 buildroot/rootfs/usr/bin/kiln-npu-keepon /usr/bin/kiln-npu-keepon
-if [ -d /etc/udev/rules.d ]; then
-	$SUDO install -m0644 buildroot/rootfs/etc/udev/rules.d/99-kiln-npu-keepon.rules /etc/udev/rules.d/
-	$SUDO udevadm control --reload 2>/dev/null || true
-	say "NPU keep-resident udev rule installed (applies on next cold boot)."
-fi
 # optional systemd unit for kiln-serve
 if [ -f buildroot/rootfs/etc/systemd/system/kiln-serve.service ] && [ -d /etc/systemd/system ]; then
 	$SUDO install -m0644 buildroot/rootfs/etc/systemd/system/kiln-serve.service /etc/systemd/system/

@@ -75,14 +75,12 @@ if ! grep -q 'KILN: never touch NPU registers if power-on failed' "$RKNPU/rknpu_
 		&& echo "[kiln] applied power-on-failure bail shim (no SError on -110)."
 fi
 
-# NOTE: keeping the NPU resident is done from userspace, NOT in the driver.
-# An earlier no-op-rknpu_power_off() shim was WRONG: it left pm_runtime/regulator
-# refcounts unbalanced, so the next power-on wedged the shared PMU path and CPU
-# DVFS timed out (`cpu _set_opp_voltage ... -110` -> RCU stall -> board wedge).
-# The correct, proven fix (matches the rocket/buildroot S97 workaround) is to
-# disable the NPU's runtime-PM autosuspend via sysfs so it stays cold-armed:
-#   echo on > /sys/devices/platform/27700000.npu/power/control
-# Shipped as /usr/bin/kiln-npu-keepon + a udev rule (see rootfs/). No driver hack.
+# NOTE: no driver power-keepalive hack. An earlier no-op-rknpu_power_off() shim was
+# WRONG (unbalanced pm_runtime/regulator refcounts -> next power-on wedged the PMU
+# path, `cpu _set_opp_voltage ... -110` RCU stall), and a sysfs "keep resident"
+# (power/control=on) does not hold the driver's per-domain genpd votes anyway. The
+# real fix is the kernel patch kernel-patches/0010 (regulator-always-on on
+# vdd_npu_s0): the NPU rail stays up, so every power-on lands on a live core.
 
 echo "[kiln] driver/rknpu is patched for mainline + RK3576 NPU execution."
 echo "[kiln] build with: make KDIR=<your-kernel-build>"

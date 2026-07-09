@@ -11,9 +11,9 @@ Validated on this dev machine (not just written):
   arm64) in DRM_GEM mode via `driver/apply-mainline-shims.sh` (12 idempotent shims,
   all found by actually compiling). Produces a 510 KB `.ko`, `vermagic` matching the
   target kernel, `import_ns: DMA_BUF`, no `rk_dma_heap` symbols.
-- The Kiln board DTS (`dts/rk3576-rock-4d-kiln.dts`) COMPILES with the tree `dtc`
-  to a valid DTB: the rocket NPU nodes are deleted, the vendor `rockchip,rk3576-rknpu`
-  node is present with the CRU fixed-rate NPU clock.
+- The vendor `rockchip,rk3576-rknpu` node + IOMMUs are added to the in-tree
+  `rockchip/rk3576-rock-4d` dtb by `kernel-patches/0004` (with a CRU fixed-rate NPU
+  clock); the KERNEL_SRC tree must have `kernel-patches/` 0001-0010 applied.
 - `buildroot/fetch-runtimes.sh` fetches librkllmrt v1.2.0 (build 2025-04-08) and
   librknnrt v2.3.0 into `dl/`.
 
@@ -33,7 +33,7 @@ nodes are removed at the DT level by the Kiln board DTS (`CUSTOM_DTS_PATH`).
 
 ## Files
 
-- `configs/kiln_rock4d_defconfig` — Kiln defconfig (rocket off, Kiln DTS, post-build).
+- `configs/kiln_rock4d_713_defconfig` — Kiln defconfig (mainline 7.1.3, rocket off, post-build).
 - `npu.fragment` — kernel fragment: `# CONFIG_DRM_ACCEL_ROCKET is not set` + deps.
 - `board/rock4d/post-build.sh` — builds+installs `rknpu.ko` against the built kernel,
   installs the runtimes, installs an `S89rknpu` init that `modprobe rknpu` at boot.

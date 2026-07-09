@@ -1,5 +1,0 @@
-# When the vendor rknpu binds its platform NPU device, immediately pin its
-# runtime-PM on so it never autosuspends (avoids the -110 CPU-DVFS wedge and the
-# warm-power-on dead core). Fires at boot right after probe, before autosuspend.
-ACTION=="bind", SUBSYSTEM=="platform", KERNEL=="*.npu", RUN+="/usr/bin/kiln-npu-keepon"
-ACTION=="add",  SUBSYSTEM=="platform", KERNEL=="*.npu", RUN+="/usr/bin/kiln-npu-keepon"

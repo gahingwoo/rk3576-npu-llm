@@ -119,7 +119,7 @@ The DT node uses the **real** vendor RK3576 addresses (see `dts/`).
 - `Kbuild`, `Makefile`, `dkms.conf` — out-of-tree module build (DRM_GEM; DKMS)
 - `kernel-patches/` — RK3576 NPU pmdomain/iommu/DT patches (mainline build);
   `kernel-patches-rk3568/` — RK3568 / ROCK 3B (untested; see `RK3568.md`)
-- `dts/` — RK3576 NPU board DTS + `*-kiln-npu.dtso` overlay
+- `dts/` — `*-kiln-npu.dtso` NPU device-tree overlay (alternative Armbian path)
 - `buildroot/board/rock4d/` — tool sources: `kiln_config.h`, `kiln_llm.h` /
   `kiln_vision.h` (runtime wrappers), `kiln_serve.cpp`, `rkllm_chat.cpp`,
   `rknn_mobilenet.cpp`

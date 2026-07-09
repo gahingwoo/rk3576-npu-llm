@@ -19,7 +19,7 @@
  * plain CRU gate while the real DSU clock never comes up, so the NPU power domain
  * cannot stabilise and probe dies with "failed to get pm runtime ... -110". The
  * IOMMU nodes still use <&cru 232> for their DSU gate (that path only enables,
- * it does not set the rate). See dts/kiln-rk3576-npu.dtsi for the ground truth.
+ * it does not set the rate). See kernel-patches/0004 for the in-tree NPU node.
  *
  * Build:  dtc -@ -I dts -O dtb -o rk3576-rock-4d-kiln-npu.dtbo rk3576-rock-4d-kiln-npu.dtso
  * (the standalone "reg has invalid length" / addr-size warnings are cosmetic --

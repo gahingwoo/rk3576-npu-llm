@@ -35,9 +35,9 @@ BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_KILN_PATH)/npu.fragment"
 BR2_LINUX_KERNEL_IMAGE_TARGET_CUSTOM=y
 BR2_LINUX_KERNEL_IMAGE_TARGET_NAME="Image"
 BR2_LINUX_KERNEL_DTS_SUPPORT=y
-# Kiln board DTS: deletes the rocket NPU nodes, adds the vendor rknpu node with
-# a CRU fixed-rate NPU clock (NOT SCMI). Built out-of-tree via CUSTOM_DTS_PATH so
-# the read-only kernel source is not modified.
+# The vendor rknpu node + IOMMUs are added to the in-tree rk3576-rock-4d dtb by
+# kernel-patches/0004 (KERNEL_SRC must have 0001-0010 applied); clk_npu via CRU
+# (not SCMI). So we build the stock in-tree DTS name, no custom/overlay DTS.
 BR2_LINUX_KERNEL_INTREE_DTS_NAME="rockchip/rk3576-rock-4d"
 BR2_LINUX_KERNEL_NEEDS_HOST_OPENSSL=y
 BR2_LINUX_KERNEL_INSTALL_TARGET=y
