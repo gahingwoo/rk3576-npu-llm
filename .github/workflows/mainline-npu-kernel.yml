@@ -77,6 +77,9 @@ jobs:
           ./scripts/config --disable DRM_ACCEL_ROCKET
           # keep the pieces the NPU stack needs on
           ./scripts/config --enable ROCKCHIP_IOMMU --enable ARM_ROCKCHIP_CPUFREQ || true
+          # ftrace + tracepoints (regmap_reg_write, clk, power) for the capture/
+          # diagnostics -- FUNCTION_TRACER pulls in TRACING -> tracefs + events.
+          ./scripts/config --enable FTRACE --enable FUNCTION_TRACER || true
           # ROOT-ON-NVME: the ROCK 4D's M.2 NVMe sits behind the RK3576 PCIe3 PHY.
           # The base config has it =m, so it isn't up at boot -> NVMe not found ->
           # initramfs. Force the PCIe controller + both PHYs built-in so root mounts.
@@ -86,8 +89,8 @@ jobs:
                            --enable PCIE_DW_ROCKCHIP \
                            --enable BLK_DEV_NVME --enable NVME_CORE || true
           make ARCH=arm64 olddefconfig
-          echo "--- PCIe/NVMe after olddefconfig ---"
-          grep -E 'PHY_ROCKCHIP_SNPS_PCIE3|PCIE_ROCKCHIP_DW|BLK_DEV_NVME=' .config
+          echo "--- PCIe/NVMe/ftrace after olddefconfig ---"
+          grep -E 'PHY_ROCKCHIP_SNPS_PCIE3|PCIE_ROCKCHIP_DW|BLK_DEV_NVME=|CONFIG_FTRACE=|CONFIG_TRACING=' .config
 
       - name: Build (bindeb-pkg)
         run: |

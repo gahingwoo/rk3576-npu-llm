@@ -78,6 +78,8 @@ jobs:
           ./scripts/config --enable ROCKCHIP_IOMMU \
                            --enable DRM --enable DRM_ROCKCHIP \
                            --enable ARM_ROCKCHIP_CPUFREQ || true
+          # ftrace + tracepoints for the capture/ diagnostics
+          ./scripts/config --enable FTRACE --enable FUNCTION_TRACER || true
           make ARCH=arm64 olddefconfig
           echo "--- IOMMU/DRM after olddefconfig ---"
           grep -E 'ROCKCHIP_IOMMU|DRM_ROCKCHIP|DRM_ACCEL_ROCKET' .config || true
