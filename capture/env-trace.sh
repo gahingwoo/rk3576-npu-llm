@@ -152,6 +152,16 @@ echo 0 > "$T/tracing_on"
 OUT="$OUTDIR/env-${LABEL}.txt"
 norm "$T/trace" > "$OUT"
 echo "  -> $(wc -l < "$OUT") unique env events -> $OUT"
+# Sanity: a valid capture MUST include NPU-relevant writes (genpd/QoS/rknn/npu).
+# Zero of them means the workload never drove the NPU -- almost always the WRONG
+# boot mode (label is just a filename; the DTB decides which driver binds).
+NPU_N=$(grep -acE 'power-management|qos@|rknn|27700000|iommu' "$OUT" 2>/dev/null || echo 0)
+if [ "$NPU_N" -eq 0 ]; then
+	echo "  !! WARNING: 0 NPU-relevant events -- the NPU never powered on in this capture."
+	echo "     '$LABEL' is only a FILENAME; the boot DTB decides the driver. Capture kiln"
+	echo "     while booted on the KILN entry, rocket on the ROCKET entry (with"
+	echo "     '-- kiln-rocket-run'). This file is not usable for the diff as-is."
+fi
 echo
 echo "=== highlight: NPU-relevant env writes (regmap/iommu/genpd/npu/grf; CPU clk dropped) ==="
 # no head-cap: a truncated + sorted highlight drops whole address ranges (e.g.
