@@ -131,20 +131,29 @@ bash kiln-install.sh          # then run it
 Want to keep control of the reboots? `KILN_MANUAL=1 bash kiln-install.sh` does the
 two phases by hand (it tells you when to reboot and re-run) instead of auto-continuing.
 
-**Flashable image** — the whole thing as a buildroot br2-external (rootfs + module
-+ model baked in):
-
-```sh
-driver/fetch-vendor-driver.sh      # GPL rknpu v0.9.8 source (not redistributed)
-buildroot/fetch-runtimes.sh        # closed runtimes into buildroot/dl
-buildroot/build-image.sh
-```
+**Flashable image** — instead of installing on Armbian, build the whole thing as a
+buildroot br2-external `sdcard.img` (rootfs + module + optional baked-in model). This
+is the maintainer path — it needs prepared kernel/reference trees — so follow
+[`buildroot/README.md`](buildroot/README.md) rather than running the scripts blind.
 
 **Kernel** — CI publishes the `.deb`s; build it yourself per
 [`MAINLINE-KERNEL.md`](MAINLINE-KERNEL.md). The module alone builds against any
 patched 7.x tree: `make KDIR=/path/to/kernel/build` (after fetch + apply-shims).
 The NPU DT node (`kernel-patches/0004`) uses the **real** vendor RK3576 addresses,
 not the guessed open-driver layout.
+
+## Models
+
+Kiln ships **no** models — you supply them, same as the vendor stack. `kiln-config`
+→ **Models** lists / sets / adds / removes them, and `kiln-doctor` checks a model is
+present and version-matched.
+
+- **LLM** — put a `*-rk3576-w4a16.rkllm` in `/opt/models` (it must match `librkllmrt`
+  **1.2.0**). Convert one with `rkllm-toolkit` 1.2.0, or use a pre-converted RK3576
+  RKLLM model built for that runtime. `kiln-chat` auto-finds any `.rkllm` there.
+- **Vision** — convert a MobileNet `.rknn` with `rknn-toolkit2` **2.3.2** (on the
+  board itself or an x86 host) and drop it in `/opt/models`; see
+  [`VISION.md`](VISION.md). Classification only.
 
 ## Layout
 
@@ -153,12 +162,15 @@ not the guessed open-driver layout.
   with a rationale README), `compat/` (BSP-only `soc/rockchip/*` stubs)
 - `Kbuild`, `Makefile`, `dkms.conf` — out-of-tree module build (DRM_GEM; DKMS)
 - `kernel-patches/` — RK3576 NPU pmdomain/iommu/DT patches (mainline build);
-  `kernel-patches-rk3568/` — RK3568 / ROCK 3B (untested; see `RK3568.md`)
+  `kernel-patches-rk3568/` — RK3568 / ROCK 3B (untested; see [`RK3568.md`](RK3568.md))
 - `buildroot/board/rock4d/` — tool sources: `kiln_config.h`, `kiln_llm.h` /
   `kiln_vision.h` (runtime wrappers), `kiln_serve.cpp`, `rkllm_chat.cpp`,
   `rknn_mobilenet.cpp`
-- `scripts/kiln-install.sh` — one-shot Armbian installer (kernel + module + tools)
-- `docs/` — `SERVER.md`, `CHAT.md`, `CONFIG.md` (tool references)
+- `scripts/` — `kiln-install.sh` (one-shot installer) + `kiln-phase2.sh` (offline
+  phase-2 systemd handoff, runs after the first auto-reboot), `kiln-doctor` (health
+  check), `kiln-config` (whiptail config TUI), `build-dual-kernel-tree.sh` (maintainer
+  dual-image tree); see [`scripts/README.md`](scripts/README.md)
+- `docs/` — `SERVER.md`, `CHAT.md`, `CONFIG.md`, `TOOLS.md` (tool references)
 - `ARMBIAN.md`, `MAINLINE-KERNEL.md`, `VISION.md`, `RK3568.md` — install/kernel/board paths
 - `capture/` — NPU per-op capture harness
 

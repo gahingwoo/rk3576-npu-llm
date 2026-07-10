@@ -29,6 +29,7 @@ into that kernel's DTB (`kernel-patches/0004`), so no DT overlay is involved.
 | `rknpu.ko` (vendor v0.9.8 + Kiln patch) | kernel modules | DKMS (rebuilds on kernel upgrade) |
 | `librkllmrt.so` / `librknnrt.so` (+ `libgomp`) | `/usr/lib` | fetched |
 | `kiln-chat`, `kiln-vision`, `kiln-serve` | `/usr/bin` | built / copied |
+| `kiln-doctor` (health check), `kiln-config` (config TUI) | `/usr/bin` | copied (always) |
 | model `*.rkllm` / `*.rknn` | `/opt/models` | you provide |
 
 The NPU device node ships **in the Kiln kernel's DTB** (kernel-patches/0004), so
@@ -60,7 +61,11 @@ reboots doesn't matter. **Don't cut power.**
 curl -fsSL https://raw.githubusercontent.com/gahingwoo/kiln/main/scripts/kiln-install.sh | bash
 # ...it reboots twice on its own; when done you'll see "Kiln installed" at login.
 kiln-doctor                           # confirm health (paste this in issues)
-kiln-vision /opt/models/test.jpg      # or: kiln-chat  (put your models in /opt/models)
+kiln-config                           # optional: TUI to set models / knobs / server
+
+# You supply the models (Kiln ships none). Once a MobileNet .rknn is in /opt/models:
+kiln-vision /opt/models/test.jpg      # needs a .rknn -- convert one, see VISION.md
+kiln-chat                             # needs a *.rkllm in /opt/models
 ```
 
 **Manual — keep control of the reboots** with `KILN_MANUAL=1` (no auto-reboot, no

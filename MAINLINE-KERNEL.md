@@ -67,14 +67,25 @@ sudo reboot
 
 No DT overlay is needed — the NPU node is compiled into the dtb (`0004`).
 
-## After reboot
+## After reboot — finish the install (phase 2)
+
+The steps above install only the **kernel**. Build the `rknpu` module + runtimes +
+tools on top — this is installer phase 2, which `kiln-install.sh` normally does
+automatically (offline, via the systemd handoff); by hand it is:
+
+```sh
+sudo KILN_SKIP_KERNEL=1 bash scripts/kiln-install.sh   # DKMS driver + runtimes + tools + wifi
+```
+
+Then verify:
 
 ```sh
 uname -r                          # <ver> (mainline 7.1.3)
 sudo dmesg | grep -i rknpu        # kiln mmu enable_all: ... st=0x19/0x19/0x19/0x19; NO -110
 ls /dev/dri/renderD*              # renderD129 (NPU)
-kiln-vision /opt/models/test.jpg
-kiln-chat
+kiln-doctor                       # ✓/✗ health report ("paste this in issues")
+kiln-vision /opt/models/test.jpg  # needs a MobileNet .rknn in /opt/models — see VISION.md
+kiln-chat                         # needs a *.rkllm in /opt/models
 ```
 
 ## Wi-Fi
