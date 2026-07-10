@@ -64,13 +64,13 @@ Real output (the bundled `test.jpg` is a bell), classifying correctly at ~6 ms:
 === Kiln RK3576 NPU vision (MobileNet, librknnrt) ===
 model: 1 in / 1 out, input 224x224x3 ...
 
-top-5 of 1000 classes  (NPU inference 6.2 ms):
+top-5 of 1000 classes  (NPU inference 5.9 ms):
   1. [ 494] chime, bell, gong            18.6719
   2. [ 653] milk can                     12.0391
   3. [ 469] caldron, cauldron            11.4844
   4. [ 442] bell cote, bell cot          11.1562
   5. [ 747] punching bag, punch bag ...  10.6094
-[bench] rknn inference: 6.2 ms (161.0 fps)
+[bench] rknn inference: 5.9 ms (169.5 fps)
 ```
 
 ## Build integration
