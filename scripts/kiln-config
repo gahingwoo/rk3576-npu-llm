@@ -70,14 +70,16 @@ kiln_ini_get() {
 # never into the captured stream. (whiptail prints the choice on stderr, so
 # `2>&1 1>/dev/tty` sends the widget to the tty and the choice to the caller's fd1.)
 # ---------------------------------------------------------------------------
-TITLE="Kiln config"
-msg()   { $UI --title "$TITLE" --msgbox "$1" "${2:-14}" "${3:-74}" 1>/dev/tty; }
-yesno() { $UI --title "$TITLE" --yesno "$1" "${2:-10}" "${3:-70}" 1>/dev/tty; }   # returns 0=yes
-input() { $UI --title "$TITLE" --inputbox "$1" 10 70 "$2" 3>&1 1>/dev/tty 2>&3 3>&-; }
-# NB: '--' before the tag/item list so whiptail/popt never mis-parses an item that
-# starts with '-' (e.g. a value like -1, or an odd filename) as an option -- that
-# error is otherwise swallowed by the caller's `|| break` and the TUI "won't open".
-menu()  { mt=$1; mp=$2; shift 2; $UI --title "$TITLE" --menu "$mp" 20 78 12 -- "$@" 3>&1 1>/dev/tty 2>&3 3>&-; }
+# Persistent top bar (armbian-config style). Every dialog carries it.
+BT="Kiln  ·  LLM + vision on the RK3576 NPU  ·  $CONF"
+msg()   { $UI --backtitle "$BT" --title "$TITLE" --msgbox "$1" "${2:-14}" "${3:-74}" 1>/dev/tty; }
+yesno() { $UI --backtitle "$BT" --title "$TITLE" --yesno "$1" "${2:-10}" "${3:-70}" 1>/dev/tty; }   # returns 0=yes
+input() { $UI --backtitle "$BT" --title "$TITLE" --inputbox "$1" 10 70 "$2" 3>&1 1>/dev/tty 2>&3 3>&-; }
+# menu TITLE TEXT tag item ...  -- the first arg becomes the window --title, so each
+# page reads as its own screen. '--' before the tag/item list so whiptail/popt never
+# mis-parses an item starting with '-' (e.g. -1, or an odd filename) as an option --
+# that error would otherwise be swallowed by the caller's `|| break` (TUI "won't open").
+menu()  { mt=$1; mp=$2; shift 2; $UI --backtitle "$BT" --title "$mt" --menu "$mp" 20 78 12 -- "$@" 3>&1 1>/dev/tty 2>&3 3>&-; }
 
 short() { s=$1; [ -z "$s" ] && { echo "(unset)"; return; }; b=$(basename "$s" 2>/dev/null); echo "${b:-$s}"; }
 
@@ -93,26 +95,31 @@ edit_opt() {
 radio_pick() {
 	rp=$1; cur=$2; shift 2
 	set -- $(for v in "$@"; do if [ "$v" = "$cur" ]; then printf '%s . ON ' "$v"; else printf '%s . OFF ' "$v"; fi; done)
-	sel=$($UI --title "$TITLE" --radiolist "$rp" 14 64 6 -- "$@" 3>&1 1>/dev/tty 2>&3 3>&-) || { echo "$cur"; return; }
+	sel=$($UI --backtitle "$BT" --title "$TITLE" --radiolist "$rp" 14 64 6 -- "$@" 3>&1 1>/dev/tty 2>&3 3>&-) || { echo "$cur"; return; }
 	[ -n "$sel" ] && echo "$sel" || echo "$cur"
 }
 
-# model_pick EXT current  -> scan $MODELS_DIR/*.EXT, present a menu, echo chosen path
+# model_pick EXT current  -> scan $MODELS_DIR/*.EXT, present a menu, echo chosen path.
+# Shows clean basenames (+ size), not full paths; reconstructs the path on choice.
 model_pick() {
 	ext=$1; cur=$2
 	set --
-	for f in "$MODELS_DIR"/*."$ext"; do [ -f "$f" ] && set -- "$@" "$f" "$(basename "$f")"; done
+	for f in "$MODELS_DIR"/*."$ext"; do
+		[ -f "$f" ] || continue
+		sz=$(du -h "$f" 2>/dev/null | cut -f1)
+		set -- "$@" "$(basename "$f")" "${sz:-?}"
+	done
 	if [ "$#" -eq 0 ]; then
-		msg "No *.$ext models found in $MODELS_DIR.\n\nPut one there (see kiln-config -> Models, or VISION.md / kiln-chat's /model), then come back."
+		msg "No *.$ext models found in $MODELS_DIR.\n\nDrop one there (see Models page, or VISION.md), then come back."
 		echo "$cur"; return
 	fi
-	set -- "$@" "(type a path)" "enter a path by hand"
-	[ -n "$cur" ] && set -- "$@" "(unset)" "clear this setting"
-	sel=$(menu "Pick a model" "Current: $(short "$cur")\nScanned $MODELS_DIR:" "$@") || { echo "$cur"; return; }
+	set -- "$@" "(type a path)" "enter a full path by hand"
+	[ -n "$cur" ] && set -- "$@" "(unset)" "clear this model"
+	sel=$(menu "Pick a model" "current: $(short "$cur")     ($MODELS_DIR)" "$@") || { echo "$cur"; return; }
 	case "$sel" in
 		"(type a path)") input "Full path to the model file:" "$cur" ;;
 		"(unset)")       echo "" ;;
-		*)               echo "$sel" ;;
+		*)               echo "$MODELS_DIR/$sel" ;;   # basename -> full path
 	esac
 }
 
@@ -123,7 +130,7 @@ status_page() {
 	if command -v kiln-doctor >/dev/null 2>&1; then rep=$(kiln-doctor 2>&1); else rep=$(sh "$(dirname "$0")/kiln-doctor" 2>&1 || echo "kiln-doctor not found"); fi
 	# strip ANSI so whiptail shows it cleanly
 	rep=$(printf '%s' "$rep" | sed 's/\x1b\[[0-9;]*m//g')
-	$UI --title "Status & Diagnostics" --scrolltext --yes-button "Re-run" --no-button "Back" \
+	$UI --backtitle "$BT" --title "Status & Diagnostics" --scrolltext --yes-button "Re-run" --no-button "Back" \
 		--yesno "$rep" 24 82 1>/dev/tty && status_page
 }
 
@@ -378,7 +385,7 @@ run_installer() {
 # ---------------------------------------------------------------------------
 [ -f "$CONF" ] || msg "No $CONF yet -- run the installer, or I'll create it on first save. Built-in defaults apply until then."
 while :; do
-	sel=$(menu "Kiln — LLM + vision on the RK3576 NPU" "config: $CONF" \
+	sel=$(menu "Main menu" "Configure Kiln. Pick a section:" \
 		1 "Status & Diagnostics  (kiln-doctor)" \
 		2 "LLM Settings          ([llm])" \
 		3 "Vision Settings       ([vision])" \
