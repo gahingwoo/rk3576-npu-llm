@@ -7,11 +7,11 @@
 # Design rules honored here:
 #   * <Save> writes, <Back> discards -- nothing is persisted until you confirm.
 #   * model pickers SCAN /opt/models (no path typing); enums are radio lists.
-#   * vision is CLASSIFICATION-ONLY -- the picker says so; no YOLO/detection claim.
+#   * vision defaults to CLASSIFICATION; task=detect is EXPERIMENTAL (unverified) and
+#     labelled as such -- never presented as a working feature.
 #   * needs root to edit /etc/kiln/config.ini and to read dmesg -> re-exec via sudo.
 #
-# Batch 1 (this file): Status & Diagnostics, LLM Settings, Vision Settings.
-# Batch 2 (Models / Server / Advanced) are present as clearly-marked stubs.
+# Pages: Status & Diagnostics, LLM Settings, Vision Settings, Server, Models, Advanced.
 
 CONF="${KILN_CONFIG:-/etc/kiln/config.ini}"
 MODELS_DIR="${KILN_MODELS_DIR:-/opt/models}"
@@ -74,7 +74,10 @@ TITLE="Kiln config"
 msg()   { $UI --title "$TITLE" --msgbox "$1" "${2:-14}" "${3:-74}" 1>/dev/tty; }
 yesno() { $UI --title "$TITLE" --yesno "$1" "${2:-10}" "${3:-70}" 1>/dev/tty; }   # returns 0=yes
 input() { $UI --title "$TITLE" --inputbox "$1" 10 70 "$2" 3>&1 1>/dev/tty 2>&3 3>&-; }
-menu()  { mt=$1; mp=$2; shift 2; $UI --title "$TITLE" --menu "$mp" 20 78 12 "$@" 3>&1 1>/dev/tty 2>&3 3>&-; }
+# NB: '--' before the tag/item list so whiptail/popt never mis-parses an item that
+# starts with '-' (e.g. a value like -1, or an odd filename) as an option -- that
+# error is otherwise swallowed by the caller's `|| break` and the TUI "won't open".
+menu()  { mt=$1; mp=$2; shift 2; $UI --title "$TITLE" --menu "$mp" 20 78 12 -- "$@" 3>&1 1>/dev/tty 2>&3 3>&-; }
 
 short() { s=$1; [ -z "$s" ] && { echo "(unset)"; return; }; b=$(basename "$s" 2>/dev/null); echo "${b:-$s}"; }
 
@@ -90,7 +93,7 @@ edit_opt() {
 radio_pick() {
 	rp=$1; cur=$2; shift 2
 	set -- $(for v in "$@"; do if [ "$v" = "$cur" ]; then printf '%s . ON ' "$v"; else printf '%s . OFF ' "$v"; fi; done)
-	sel=$($UI --title "$TITLE" --radiolist "$rp" 14 64 6 "$@" 3>&1 1>/dev/tty 2>&3 3>&-) || { echo "$cur"; return; }
+	sel=$($UI --title "$TITLE" --radiolist "$rp" 14 64 6 -- "$@" 3>&1 1>/dev/tty 2>&3 3>&-) || { echo "$cur"; return; }
 	[ -n "$sel" ] && echo "$sel" || echo "$cur"
 }
 
@@ -144,7 +147,6 @@ llm_page() {
 			repeat_penalty "$v_rep" \
 			keep_history   "$v_keep (1=multi-turn,0=single)" \
 			system_prompt  "$(short_sys "$v_sys")" \
-			-              "----------------------------" \
 			SAVE           "write changes to $CONF" \
 			BACK           "discard & return") || { llm_maybe_back && return; continue; }
 		case "$sel" in
@@ -195,7 +197,6 @@ vision_page() {
 			nms_iou    "$v_nms  (detect NMS IoU)" \
 			core_mask  "$v_core" \
 			priority   "$v_prio" \
-			-          "----------------------------" \
 			SAVE       "write changes to $CONF" \
 			BACK       "discard & return") || { vis_maybe_back && return; continue; }
 		case "$sel" in
@@ -246,7 +247,6 @@ server_page() {
 			host    "$v_host" \
 			port    "$v_port" \
 			service "start / stop / enable kiln-serve ->" \
-			-       "----------------------------" \
 			SAVE    "write host/port to $CONF" \
 			BACK    "discard & return") || { srv_maybe_back && return; continue; }
 		case "$sel" in
@@ -289,7 +289,6 @@ models_page() {
 			add    "add a model from a path (copy into $MODELS_DIR)" \
 			remove "remove a model file" \
 			guide  "how to get / convert models" \
-			-      "----------------------------" \
 			BACK   "back") || return
 		case "$sel" in
 			setllm) n=$(model_pick rkllm "$llm"); [ "$n" != "$llm" ] && { kiln_ini_set "$CONF" llm model "$n"; msg "[llm] model = ${n:-(unset)}"; } ;;
@@ -344,7 +343,6 @@ advanced_page() {
 			driver "rebuild the rknpu DKMS module + restore wifi" \
 			update "update Kiln (git pull + rebuild driver/runtimes; NO kernel change)" \
 			kernel "check for a Kiln KERNEL update (may reinstall + reboot)" \
-			-      "----------------------------" \
 			BACK   "back") || return
 		case "$sel" in
 			reload)
@@ -387,7 +385,6 @@ while :; do
 		4 "Server                ([server] + kiln-serve)" \
 		5 "Models                (list / set / add / remove)" \
 		6 "Advanced              (driver / kernel / wifi)" \
-		- "----------------------------" \
 		Q "Quit") || break
 	case "$sel" in
 		1) status_page ;;
