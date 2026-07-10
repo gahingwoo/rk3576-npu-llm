@@ -13,13 +13,20 @@
 //    not runtime-settable -- so they are deliberately absent.)
 #pragma once
 #include <string>
+#include <vector>
+#include <algorithm>
 #include <fstream>
 #include <sstream>
+#include <cstdio>
 #include <cstdlib>
+#include <dirent.h>
 
 struct KilnConfig {
-    // [llm] -- librkllmrt RKLLMParam / APIs
-    std::string llm_model            = "/opt/models/Qwen2.5-1.5B-rk3576-w4a16.rkllm";
+    // [llm] -- librkllmrt RKLLMParam / APIs.
+    // Empty by default: Kiln ships no model and does not hard-code one. The tools
+    // AUTO-DISCOVER a *.rkllm in /opt/models when this is empty or the file is
+    // missing (see kiln::resolve_model). Set a path to pin a specific model.
+    std::string llm_model            = "";
     int         llm_max_context_len  = 2048;
     int         llm_max_new_tokens   = 512;
     int         llm_top_k            = 1;     // greedy: most coherent on the 1.5B w4a16
@@ -67,6 +74,39 @@ namespace kiln {
 inline std::string config_path() {
     const char *e = getenv("KILN_CONFIG");
     return e && *e ? std::string(e) : std::string("/etc/kiln/config.ini");
+}
+
+inline bool file_exists(const std::string &p) {
+    if (p.empty()) return false;
+    FILE *f = fopen(p.c_str(), "rb"); if (!f) return false; fclose(f); return true;
+}
+inline std::string dir_of(const std::string &p) {
+    size_t s = p.find_last_of('/');
+    return s == std::string::npos ? std::string(".") : p.substr(0, s);
+}
+// Return dir + "/" + <first file ending in `ext`, name-sorted>, or "" if none.
+inline std::string first_model(const std::string &dir, const char *ext) {
+    DIR *d = opendir(dir.c_str()); if (!d) return "";
+    std::vector<std::string> names; std::string e = ext;
+    for (dirent *de; (de = readdir(d)); ) {
+        std::string n = de->d_name;
+        if (n.size() > e.size() && n.compare(n.size() - e.size(), e.size(), e) == 0) names.push_back(n);
+    }
+    closedir(d);
+    if (names.empty()) return "";
+    std::sort(names.begin(), names.end());
+    return dir + "/" + names[0];
+}
+// Resolve a model path: use `configured` if it exists; otherwise AUTO-DISCOVER a
+// *ext file (in `configured`'s dir when set, else in `fallback_dir`). Returns "" if
+// nothing is found. This is how Kiln avoids hard-coding a model name.
+inline std::string resolve_model(const std::string &configured, const char *ext,
+                                 const std::string &fallback_dir = "/opt/models") {
+    if (file_exists(configured)) return configured;
+    std::string dir = configured.empty() ? fallback_dir : dir_of(configured);
+    std::string m = first_model(dir, ext);
+    if (m.empty() && dir != fallback_dir) m = first_model(fallback_dir, ext);
+    return m;
 }
 
 inline std::string trim(const std::string &s) {

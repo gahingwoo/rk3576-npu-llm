@@ -107,10 +107,20 @@ VIS="$(ini_get vision model)"
 LAB="$(ini_get vision labels)"
 VTASK="$(ini_get vision task)"; [ -n "$VTASK" ] || VTASK=classify
 [ "$VTASK" = detect ] && warn "[vision] task = detect is EXPERIMENTAL (YOLOv8/11, unverified) -- boxes may be wrong; classify is the supported path"
-if [ -z "$LLM" ]; then
-	info "[llm] model is empty (vision-only setup) -- kiln-chat disabled"
-elif [ -f "$LLM" ]; then ok "LLM model present: $LLM"
-else bad "LLM model MISSING: $LLM -- put a *-rk3576-w4a16.rkllm there, or fix it in kiln-config"; fi
+# LLM is auto-discovered (Kiln hard-codes no model): use the configured one if it
+# exists, else the first *.rkllm in /opt/models. Report what will actually load.
+MODELS_DIR="${KILN_MODELS_DIR:-/opt/models}"
+LLM_AUTO="$(ls "$MODELS_DIR"/*.rkllm 2>/dev/null | sort | head -1)"
+if [ -n "$LLM" ] && [ -f "$LLM" ]; then
+	ok "LLM model: $LLM"
+elif [ -n "$LLM_AUTO" ]; then
+	if [ -n "$LLM" ]; then ok "LLM model: $LLM_AUTO (configured '$LLM' missing -> auto-selected)"
+	else ok "LLM model: $LLM_AUTO (auto-discovered; no [llm] model set)"; fi
+elif [ -n "$LLM" ]; then
+	bad "LLM model MISSING: $LLM and no *.rkllm in $MODELS_DIR -- put one there or fix it in kiln-config"
+else
+	info "no LLM model yet (vision-only) -- drop a *-rk3576-w4a16.rkllm in $MODELS_DIR and kiln-chat finds it"
+fi
 if [ -z "$VIS" ]; then
 	warn "[vision] model is empty"
 elif [ -f "$VIS" ]; then ok "vision model present: $VIS"

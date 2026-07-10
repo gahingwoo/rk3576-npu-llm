@@ -34,7 +34,7 @@ setting.
 
 | key | meaning |
 |---|---|
-| `model` | path to the `.rkllm` |
+| `model` | path to the `.rkllm` — **empty by default**; the tools then auto-discover any `*.rkllm` in `/opt/models`. Set a path to pin one. |
 | `system_prompt` | system message content (wrapped in the model's ChatML markers) |
 | `max_context_len` | context window (tokens) |
 | `max_new_tokens` | max tokens generated per turn |
@@ -77,7 +77,7 @@ it does not configure them.
 
 ```ini
 [llm]
-model = /opt/models/Qwen2.5-1.5B-rk3576-w4a16.rkllm
+model =                   # empty = auto-discover any *.rkllm in /opt/models
 max_context_len = 2048
 temperature = 0.8
 keep_history = 1          # 1 = multi-turn (default), 0 = single-turn

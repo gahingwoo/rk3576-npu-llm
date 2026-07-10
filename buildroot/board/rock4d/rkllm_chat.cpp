@@ -367,21 +367,22 @@ int main(int argc, char **argv) {
     if (argc > 2) cfg.llm_max_new_tokens = atoi(argv[2]);
     if (argc > 3) cfg.llm_max_context_len = atoi(argv[3]);
 
-    // If the configured model file is missing, fall back to any .rkllm in its
-    // directory -- a fresh box often has a different model than the default, and
-    // hard-failing on a fixed filename is unfriendly.
-    if (!cfg.llm_model.empty() && !file_exists(cfg.llm_model)) {
-        std::string dir = dir_of(cfg.llm_model);
-        std::vector<std::string> models = list_models(dir);
-        if (!models.empty()) {
-            printf("[configured model '%s' not found; using '%s']\n",
-                   base_of(cfg.llm_model).c_str(), models[0].c_str());
-            cfg.llm_model = dir + "/" + models[0];
-        } else {
-            printf("no .rkllm model in %s -- copy one there or set [llm].model in %s\n",
-                   dir.c_str(), kiln::config_path().c_str());
+    // Kiln hard-codes no model. AUTO-DISCOVER a .rkllm: use the configured one if it
+    // exists, else pick one from its dir (or /opt/models when none is set). Only
+    // hard-fail when there is genuinely nothing to run.
+    {
+        std::string resolved = kiln::resolve_model(cfg.llm_model, ".rkllm");
+        if (resolved.empty()) {
+            printf("no .rkllm model in /opt/models -- copy one there or set [llm].model in %s\n",
+                   kiln::config_path().c_str());
             return -1;
         }
+        if (cfg.llm_model.empty())
+            printf("[no [llm] model set; auto-selected '%s']\n", base_of(resolved).c_str());
+        else if (resolved != cfg.llm_model)
+            printf("[configured model '%s' not found; using '%s']\n",
+                   base_of(cfg.llm_model).c_str(), base_of(resolved).c_str());
+        cfg.llm_model = resolved;
     }
 
     signal(SIGINT, on_sigint);

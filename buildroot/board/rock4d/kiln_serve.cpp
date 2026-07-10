@@ -94,8 +94,11 @@ int main(int argc, char **argv) {
         else if (k == "--model") cfg.server_llm_model = argv[i + 1];
     }
 
-    const std::string model_path = cfg.server_llm();
-    const std::string model_name = model_path.substr(model_path.find_last_of('/') + 1);
+    // AUTO-DISCOVER the LLM (Kiln hard-codes none): the configured [server].llm_model
+    // / [llm].model if it exists, else the first *.rkllm in /opt/models. Empty -> no
+    // LLM (vision-only), which is a valid mode (e.g. RK3568).
+    const std::string model_path = kiln::resolve_model(cfg.server_llm(), ".rkllm");
+    const std::string model_name = model_path.empty() ? "" : model_path.substr(model_path.find_last_of('/') + 1);
 
     // Optional LLM: RK3568 (and any vision-only box) has no .rkllm, so don't hard
     // fail -- start vision-only and let /v1/chat/completions answer 503.
