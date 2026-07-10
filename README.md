@@ -170,7 +170,8 @@ present and version-matched.
   phase-2 systemd handoff, runs after the first auto-reboot), `kiln-doctor` (health
   check), `kiln-config` (whiptail config TUI), `build-dual-kernel-tree.sh` (maintainer
   dual-image tree); see [`scripts/README.md`](scripts/README.md)
-- `docs/` — `SERVER.md`, `CHAT.md`, `CONFIG.md`, `TOOLS.md` (tool references)
+- `docs/` — tool references (`SERVER.md`, `CHAT.md`, `CONFIG.md`, `TOOLS.md`) + the
+  full [documentation index](docs/README.md)
 - `ARMBIAN.md`, `MAINLINE-KERNEL.md`, `VISION.md`, `RK3568.md` — install/kernel/board paths
 - `capture/` — NPU per-op capture harness
 
