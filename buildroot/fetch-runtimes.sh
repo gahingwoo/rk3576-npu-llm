@@ -84,6 +84,9 @@ else
 fi
 
 echo "[kiln] runtimes in $DL:"
-printf '  librkllmrt.so  '; strings "$DL/librkllmrt.so" | grep -m1 "RKLLM SDK (version" || echo "?"
-printf '  librknnrt.so   '; strings "$DL/librknnrt.so"  | grep -m1 "librknnrt version" || echo "?"
+# capture first, then print -- `strings | grep -m1` closes the pipe on the match,
+# so under `set -o pipefail` the pipeline returns SIGPIPE(141); `|| true` swallows
+# that and we print the captured version (or ? only when genuinely not found).
+v="$(strings "$DL/librkllmrt.so" | grep -m1 'RKLLM SDK (version' || true)"; printf '  librkllmrt.so  %s\n' "${v:-?}"
+v="$(strings "$DL/librknnrt.so"  | grep -m1 'librknnrt version'  || true)"; printf '  librknnrt.so   %s\n' "${v:-?}"
 printf '  libgomp.so.1   staged (%s)\n' "$GOMP"

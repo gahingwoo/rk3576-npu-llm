@@ -3,6 +3,9 @@
 /br-dl/
 *.log
 
+# --- Installer offline cache (pre-downloaded in phase 1; deployment clone only)
+/cache/
+
 # --- Fetched at build time (GPL source pulled, not redistributed here) -------
 /driver/rknpu/
 

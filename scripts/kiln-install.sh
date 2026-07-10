@@ -6,7 +6,10 @@
 # Runs on Armbian userspace with a Kiln MAINLINE kernel. Two phases (it tells you
 # when to reboot between them):
 #
-#   PHASE 1 — installs the Kiln mainline 7.1.3 kernel (mainline + a small
+#   PHASE 1 — on the stock kernel (with network): PRE-DOWNLOADS everything phase 2
+#     needs into an on-disk cache under $KILN_DIR (closed runtimes + demo sources,
+#     the vendor GPL driver source, the mobilenet test assets, and the aic8800 wifi
+#     source), THEN installs the Kiln mainline 7.1.3 kernel (mainline + a small
 #     pm-domain settle-delay fix that must be COMPILED INTO the kernel; the
 #     out-of-tree module can't supply it, and a stock kernel SError-freezes the
 #     NPU on the first inference). Prebuilt by CI, published as a release; the NPU
@@ -15,7 +18,11 @@
 #
 #   PHASE 2 — after you reboot into that kernel: builds the vendor rknpu driver
 #     (DKMS) and installs the RKLLM/RKNN runtimes and the kiln-chat / kiln-vision
-#     demos. No DT overlay -- the NPU node is already in the dtb.
+#     demos, then restores onboard wifi (patched aic8800). No DT overlay -- the NPU
+#     node is already in the dtb. Runs FULLY OFFLINE from the phase-1 cache: the
+#     patched kernel has no onboard wifi until phase 2 rebuilds it, so phase 2 must
+#     not need the network -- and it doesn't. (That wifi-vs-network chicken-and-egg
+#     was the old install deadlock.)
 #
 # You supply the model files (a *-rk3576-w4a16.rkllm and/or a *_rk3576.rknn).
 #
@@ -51,10 +58,18 @@ KTAG="${KILN_KERNEL_TAG:-$DEF_KTAG}"
 AIC_REPO="${KILN_AIC_REPO:-https://github.com/radxa-pkg/aic8800.git}"
 AIC_REF="${KILN_AIC_REF:-5.0+git20260123.5f7be68d-6}"   # the release Kiln's patch is verified against
 KILN_DIR="${KILN_DIR:-/opt/kiln}"
+AIC_CACHE="$KILN_DIR/cache/aic8800"   # phase-1 pre-clone of the aic8800 source ->
+                                      # phase-2 restores wifi OFFLINE (no clone).
 PKG=kiln-rknpu; VER=0.9.8
 KREL="$(uname -r)"
 MARKER=/etc/kiln/patched-kernel
 SUDO=""; [ "$(id -u)" -eq 0 ] || SUDO=sudo
+# Bound network hangs on a plugged-in-but-DEAD network (dead switch, stale static
+# IP, captive portal): fail fast instead of stalling for the full TCP timeout.
+# git: give up if a transfer stays under 1 KB/s for 15s. curl: for the small JSON
+# API calls (NOT the big .deb downloads, which only get a connect timeout).
+export GIT_HTTP_LOW_SPEED_LIMIT=1024 GIT_HTTP_LOW_SPEED_TIME=15
+CURL_NET="--connect-timeout 8 --max-time 25"
 
 say(){ printf '\n\033[1;36m[kiln]\033[0m %s\n' "$*"; }
 die(){ printf '\n\033[1;31m[kiln] ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
@@ -117,9 +132,17 @@ install_patched_aic8800(){
 	$SUDO dkms status 2>/dev/null | sed -E 's#[/,:]# #g' | awk '/aic8800/{print $1"/"$2}' | sort -u |
 	while read -r old; do [ -n "$old" ] && $SUDO dkms remove "$old" --all >/dev/null 2>&1 || true; done
 	src="$(mktemp -d)"
-	git clone --depth 1 --branch "$AIC_REF" "$AIC_REPO" "$src/a" >/dev/null 2>&1 \
-		|| git clone --depth 1 "$AIC_REPO" "$src/a" >/dev/null 2>&1 \
-		|| { say "  WARN: couldn't fetch aic8800 source; wifi stays down on $k (use ethernet)."; rm -rf "$src"; return 0; }
+	if [ -d "$AIC_CACHE/src/USB" ]; then
+		# OFFLINE path: use the source pre-cloned in phase 1 (no network needed on
+		# the wifi-less patched kernel). This is what breaks the install deadlock.
+		say "  using pre-cached aic8800 source ($AIC_CACHE)"
+		cp -r "$AIC_CACHE" "$src/a"
+	elif git clone --depth 1 --branch "$AIC_REF" "$AIC_REPO" "$src/a" >/dev/null 2>&1 \
+		|| git clone --depth 1 "$AIC_REPO" "$src/a" >/dev/null 2>&1; then
+		: # online fallback (no cache, e.g. a manual driver-only re-run)
+	else
+		say "  WARN: couldn't fetch aic8800 source; wifi stays down on $k (use ethernet)."; rm -rf "$src"; return 0
+	fi
 	if ! ( cd "$src/a" && patch -p1 < "$pf" ) >/dev/null 2>&1; then
 		say "  WARN: aic8800 patch did not apply (upstream moved); wifi stays down on $k."; rm -rf "$src"; return 0
 	fi
@@ -145,6 +168,92 @@ install_patched_aic8800(){
 	rm -rf "$src"
 }
 
+# Clone (or fast-forward) the Kiln repo into $KILN_DIR. Hoisted to run in phase 1
+# so the fetch scripts + the offline cache land on disk BEFORE the first reboot;
+# $KILN_DIR persists across reboots, so phase 2 finds it all locally. Honors
+# KILN_SKIP_REPO (use the tree exactly as-is). cd's into $KILN_DIR.
+fetch_kiln_repo(){
+	if [ -n "${KILN_SKIP_REPO:-}" ]; then
+		[ -d "$KILN_DIR" ] || die "KILN_SKIP_REPO set but $KILN_DIR doesn't exist yet -- need it once without the skip."
+		say "KILN_SKIP_REPO set — using $KILN_DIR as-is (no git pull/clone)."
+	else
+		say "fetching Kiln into $KILN_DIR ..."
+		if [ -d "$KILN_DIR/.git" ]; then
+			$SUDO git -C "$KILN_DIR" pull --ff-only || true
+		else
+			# No .git yet. Clone into a temp dir and swap in only on success -- never
+			# rm -rf the existing tree before a clone that could fail offline (that
+			# would wipe a hand-placed tree / the cache and leave nothing).
+			ktmp="$(mktemp -d)"
+			if $SUDO git clone --depth 1 "$REPO" "$ktmp/k"; then
+				$SUDO rm -rf "$KILN_DIR"; $SUDO mkdir -p "$(dirname "$KILN_DIR")"; $SUDO mv "$ktmp/k" "$KILN_DIR"
+				$SUDO rm -rf "$ktmp"
+			else
+				$SUDO rm -rf "$ktmp"
+				die "couldn't clone $REPO into $KILN_DIR (the first run needs network)."
+			fi
+		fi
+		# Cloned as root, but fetch-runtimes / g++ demos run as you and write back into
+		# the tree (buildroot/dl, model/); hand it over so those writes don't EPERM.
+		$SUDO chown -R "$(id -u):$(id -g)" "$KILN_DIR"
+	fi
+	cd "$KILN_DIR"
+}
+
+# Pre-clone the aic8800 wifi source (rk3576 only) into $AIC_CACHE while we still
+# have network (phase 1), so phase 2 can rebuild wifi OFFLINE on the patched
+# kernel. Best-effort: a failure here just means phase 2 falls back to an online
+# clone (or ethernet). Idempotent -- skips if already cached.
+precache_aic8800(){
+	[ "$SOC" = rk3576 ] || return 0
+	command -v git >/dev/null 2>&1 || return 0
+	ls "$KILN_DIR"/aic8800-patches/0001-*.patch >/dev/null 2>&1 || return 0
+	if [ -d "$AIC_CACHE/src/USB" ]; then say "  aic8800 source already cached"; return 0; fi
+	say "pre-caching aic8800 wifi source (for offline phase 2) ..."
+	$SUDO mkdir -p "$(dirname "$AIC_CACHE")"; $SUDO rm -rf "$AIC_CACHE"
+	if $SUDO git clone --depth 1 --branch "$AIC_REF" "$AIC_REPO" "$AIC_CACHE" >/dev/null 2>&1 \
+		|| $SUDO git clone --depth 1 "$AIC_REPO" "$AIC_CACHE" >/dev/null 2>&1; then
+		$SUDO chown -R "$(id -u):$(id -g)" "$AIC_CACHE" 2>/dev/null || true
+		say "  aic8800 source cached at $AIC_CACHE"
+	else
+		say "  WARN: couldn't pre-cache aic8800 source; phase 2 will try online (or use ethernet)."
+		$SUDO rm -rf "$AIC_CACHE"
+	fi
+}
+
+# Pull EVERYTHING phase 2 needs into the on-disk cache so phase 2 runs with no
+# network (the patched kernel has no wifi until phase 2 rebuilds it -- that was the
+# deadlock). All idempotent, all land under $KILN_DIR (persists across the reboot).
+#
+# The vendor GPL rknpu source is MANDATORY: phase 2's DKMS build has no online
+# fallback on the wifi-less kernel, so a failure to fetch it now (while online)
+# must ABORT here -- on the networked stock kernel -- not silently continue and
+# strand the user after the reboot. The heavy RKLLM/RKNN runtime + vision blobs are
+# what KILN_SKIP_RUNTIMES controls; the driver source and the aic8800 wifi source
+# are NOT "runtimes" and are always fetched (they are the deadlock-critical bits).
+predownload_cache(){
+	say "pre-downloading everything phase 2 needs (so it can run offline) ..."
+	# vendor GPL rknpu source -> driver/rknpu, so DKMS PRE_BUILD is offline in phase 2.
+	bash driver/fetch-vendor-driver.sh \
+		|| die "couldn't fetch the rknpu driver source. Fix networking and re-run -- phase 2 (offline) needs it."
+	[ -f driver/rknpu/include/rknpu_drv.h ] \
+		|| die "rknpu driver source looks incomplete after fetch; re-run (KILN_FORCE_FETCH=1 to force a fresh pull)."
+	# aic8800 wifi source -> cache/aic8800. Best-effort (the NPU install does not
+	# depend on wifi; a failure just means phase 2 falls back to online/ethernet).
+	precache_aic8800
+	if [ -n "${KILN_SKIP_RUNTIMES:-}" ]; then
+		say "KILN_SKIP_RUNTIMES set — skipping the heavy runtime/vision pre-download (fetch them later, online)."
+	else
+		bash buildroot/fetch-runtimes.sh
+		bash buildroot/fetch-vision-assets.sh || true
+	fi
+	if [ -n "${KILN_SKIP_RUNTIMES:-}" ]; then
+		say "cache ready under $KILN_DIR (driver/rknpu, cache/aic8800; runtimes skipped)."
+	else
+		say "cache ready under $KILN_DIR (driver/rknpu, cache/aic8800, buildroot/dl, model/)."
+	fi
+}
+
 # --- 0. preflight -----------------------------------------------------------
 say "Kiln installer — RK3576 NPU on Armbian"
 [ "$(uname -m)" = aarch64 ] || die "aarch64 only (found $(uname -m))"
@@ -161,11 +270,27 @@ if ! $SUDO dpkg --configure -a >/dev/null 2>&1; then
 	prune_unbuildable_dkms "$(ls -1 /lib/modules 2>/dev/null | sort -V | tail -1)"
 	$SUDO dpkg --configure -a || true
 fi
-say "installing prerequisites ..."
-$SUDO apt-get update -qq || true
-$SUDO apt-get install -y git build-essential dkms device-tree-compiler curl ca-certificates u-boot-tools \
-	libreadline-dev \
-	|| die "apt failed installing prerequisites."
+# Offline-safe: only touch apt when something is actually missing. A phase-2 run
+# (patched kernel, no wifi) already has all of these from phase 1, so re-running
+# apt-get install would needlessly try the network -- and `|| die` would then abort
+# the whole offline install. Skip it when the prerequisites are already present.
+need_apt=0
+for c in git gcc dkms dtc curl mkimage; do command -v "$c" >/dev/null 2>&1 || need_apt=1; done
+for p in libreadline-dev libgomp1 ca-certificates; do dpkg -s "$p" >/dev/null 2>&1 || need_apt=1; done
+if [ "$need_apt" = 1 ]; then
+	say "installing prerequisites ..."
+	$SUDO apt-get update -qq || true
+	$SUDO apt-get install -y git build-essential dkms device-tree-compiler curl ca-certificates u-boot-tools \
+		libreadline-dev libgomp1 \
+		|| die "apt failed installing prerequisites (need network for the first run)."
+else
+	say "prerequisites already present — skipping apt."
+fi
+
+# --- 1b. fetch Kiln FIRST (before the kernel phase) -------------------------
+# Hoisted here so phase 1 can pre-download the offline cache into $KILN_DIR while
+# it still has network; $KILN_DIR survives the reboot, so phase 2 finds it all.
+fetch_kiln_repo
 
 # --- 2. KERNEL PHASE (install the patched kernel once, then reboot) ----------
 # The deb version (e.g. 20260708.13) the '$KTAG' release currently offers; empty
@@ -173,7 +298,7 @@ $SUDO apt-get install -y git build-essential dkms device-tree-compiler curl ca-c
 # -- not the release string -- is what tells a new kernel (e.g. with 0010) from an
 # old one; the marker records it so a newer published build re-installs by itself.
 kernel_release_ver(){
-	curl -fsSL "https://api.github.com/repos/$GH/releases/tags/$KTAG" 2>/dev/null \
+	curl -fsSL $CURL_NET "https://api.github.com/repos/$GH/releases/tags/$KTAG" 2>/dev/null \
 		| grep -o 'linux-image-[^"]*\.deb' | grep -v -- '-dbg' | head -1 | awk -F_ '{print $2}'
 }
 # True once we're running the Kiln kernel AND it is the version the release now
@@ -191,14 +316,23 @@ on_patched_kernel(){
 KERNEL_CHANGED=0
 if [ -n "${KILN_SKIP_KERNEL:-}" ]; then
 	say "KILN_SKIP_KERNEL set — skipping the kernel check/install; assuming $KREL is fine."
+	# Still ensure the offline cache exists on this path (it's what the phase-2
+	# systemd handoff uses, and what a first run with KILN_SKIP_KERNEL would need).
+	# Idempotent: a no-op when the cache is already complete.
+	predownload_cache
 elif ! on_patched_kernel; then
 	KERNEL_CHANGED=1
+	# Fill the offline cache BEFORE installing the kernel. If a download fails
+	# (network hiccup), we abort here -- still on the stock kernel WITH wifi, so the
+	# user just fixes it and re-runs. Installing the kernel first and failing here
+	# would strand them on the wifi-less patched kernel with an incomplete cache.
+	predownload_cache
 	say "installing the Kiln mainline NPU kernel from the '$KTAG' release ..."
 	TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 	# exclude the -dbg debug-symbol image (bindeb-pkg builds it; ~hundreds of MB,
 	# not needed, and its name also matches linux-image-*.deb below).
-	( cd "$TMP" && curl -fsSL "https://api.github.com/repos/$GH/releases/tags/$KTAG" \
-		| grep -o 'https://[^"]*\.deb' | grep -v -- '-dbg' | xargs -n1 -r curl -fLO ) \
+	( cd "$TMP" && curl -fsSL $CURL_NET "https://api.github.com/repos/$GH/releases/tags/$KTAG" \
+		| grep -o 'https://[^"]*\.deb' | grep -v -- '-dbg' | xargs -n1 -r curl -fL --connect-timeout 8 -O ) \
 		|| die "could not download the mainline kernel .debs from the '$KTAG' release."
 	IMG="$(ls "$TMP"/linux-image-*.deb 2>/dev/null | head -1)"
 	[ -f "$IMG" ] || die "no linux-image .deb in the '$KTAG' release (is the CI build published?)."
@@ -222,28 +356,21 @@ elif ! on_patched_kernel; then
 	$SUDO mkdir -p /etc/kiln; printf '%s\n%s\n' "$KREL_NEW" "$DEBVER" | $SUDO tee "$MARKER" >/dev/null
 	cat <<EOF
 
-[kiln] Mainline NPU kernel $KREL_NEW installed. REBOOT into it, then run this
-       installer again to finish (rknpu module + runtimes + demos):
+[kiln] Mainline NPU kernel $KREL_NEW installed, and everything phase 2 needs is
+       cached on disk. Onboard wifi will be DOWN on the new kernel until phase 2
+       rebuilds it -- but phase 2 now runs fully OFFLINE, so that's fine. REBOOT
+       into the new kernel, then run this installer again to finish:
 
            sudo reboot
-           curl -fsSL https://raw.githubusercontent.com/$GH/main/scripts/kiln-install.sh | bash
+           sudo bash $KILN_DIR/scripts/kiln-install.sh   # runs offline, no wifi needed
 EOF
 	exit 0
 fi
-say "on the Kiln-patched kernel ($KREL) — finishing the install."
+say "on the Kiln-patched kernel ($KREL) — finishing the install (offline-capable)."
 
-# --- 3. fetch Kiln ----------------------------------------------------------
-if [ -n "${KILN_SKIP_REPO:-}" ]; then
-	[ -d "$KILN_DIR" ] || die "KILN_SKIP_REPO set but $KILN_DIR doesn't exist yet -- need it once without the skip."
-	say "KILN_SKIP_REPO set — using $KILN_DIR as-is (no git pull/clone)."
-else
-	say "fetching Kiln into $KILN_DIR ..."
-	if [ -d "$KILN_DIR/.git" ]; then $SUDO git -C "$KILN_DIR" pull --ff-only || true
-	else $SUDO rm -rf "$KILN_DIR"; $SUDO git clone --depth 1 "$REPO" "$KILN_DIR"; fi
-	# Cloned as root, but fetch-runtimes / g++ demos run as you and write back into
-	# the tree (buildroot/dl, model/); hand it over so those writes don't EPERM.
-	$SUDO chown -R "$(id -u):$(id -g)" "$KILN_DIR"
-fi
+# The repo was already fetched before the kernel phase (fetch_kiln_repo), which
+# also cd'd into $KILN_DIR. Nothing since changed the working dir; re-assert it
+# defensively so the relative paths below resolve.
 cd "$KILN_DIR"
 
 DRIVER_REBUILT=0
@@ -254,14 +381,13 @@ else
 	# Headers came WITH the patched kernel (linux-headers deb), so this always matches.
 	[ -d "/lib/modules/$KREL/build" ] \
 		|| die "no kernel headers for $KREL (the patched linux-headers deb should provide them)."
-	say "building the rknpu driver with DKMS (fetches GPL source + applies the patch) ..."
-	# NOTE: dkms.conf's PRE_BUILD (driver/fetch-vendor-driver.sh) re-fetches the
-	# vendor source and reapplies the mainline shims on EVERY build, overwriting
-	# whatever is in driver/rknpu/ first -- including a local hand-edit you made
-	# there. If you're testing a local driver patch, don't go through DKMS at all:
-	# build it directly (make ARCH=arm64 KDIR=/lib/modules/$(uname -r)/build) and
-	# insmod the resulting rknpu.ko, or fold the patch into fetch-vendor-driver.sh
-	# so PRE_BUILD reproduces it.
+	say "building the rknpu driver with DKMS ..."
+	# dkms.conf's PRE_BUILD (driver/fetch-vendor-driver.sh) fetches the vendor GPL
+	# source and applies the mainline shims. It is now idempotent: if driver/rknpu
+	# is already present -- pre-fetched in phase 1 (so this DKMS build runs OFFLINE),
+	# or a local driver patch you're testing -- it does nothing. So PRE_BUILD no
+	# longer needs network here, and no longer silently clobbers a local hand-edit.
+	# Force a fresh vendor pull with KILN_FORCE_FETCH=1.
 	$SUDO rm -rf "/usr/src/$PKG-$VER"; $SUDO mkdir -p "/usr/src/$PKG-$VER"
 	$SUDO cp -r Kbuild Makefile dkms.conf driver "/usr/src/$PKG-$VER/"
 	$SUDO dkms remove "$PKG/$VER" --all >/dev/null 2>&1 || true
