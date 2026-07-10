@@ -20,15 +20,36 @@ also a useful, fast, deterministic workload for probing the NPU next to the LLM.
 ## You provide the model — and it must be version-matched
 
 Rockchip ships the MobileNet **ONNX**, not a pre-converted RK3576 `.rknn`, so
-convert it once on an **x86** host with `rknn-toolkit2` (target `rk3576`) and
-drop `mobilenetv2-12_rk3576.rknn` into `/opt/models/`. `buildroot/fetch-vision-assets.sh`
-fetches the test image + labels and prints the exact conversion snippet.
+convert it once yourself — **on the board (aarch64) or an x86 host**. As of
+`rknn-toolkit2` **2.3.2** the full conversion toolkit ships native aarch64 wheels,
+so you do *not* need to keep an x86 box around just to convert
+([writeup](https://gahingwoo.github.io/posts/rknn-toolkit2-arm64/)).
+`buildroot/fetch-vision-assets.sh` fetches the test image + labels and prints the
+exact conversion snippet; it is, roughly:
 
-**RKNN has the same model/runtime version-lock as RKLLM.** Convert the model with
-the `rknn-toolkit2` version that matches the bundled `librknnrt` (Kiln pins
-**2.3.0**). A model converted with toolkit **2.1.0** threw `std::out_of_range` in
-`rknn_inputs_set` under `librknnrt` 2.3.0 — no crash in Kiln's code, purely the
-version mismatch. A 2.3.0-converted ONNX MobileNetV2 just works.
+```py
+from rknn.api import RKNN
+r = RKNN()
+r.config(mean_values=[[123.675, 116.28, 103.53]],
+         std_values=[[58.395, 57.12, 57.375]], target_platform='rk3576')
+r.load_onnx('mobilenetv2-12.onnx')
+r.build(do_quantization=False)     # fp16 — matches Kiln's shipped .rknn
+r.export_rknn('mobilenetv2-12_rk3576.rknn')
+```
+
+Then drop `mobilenetv2-12_rk3576.rknn` into `/opt/models/`.
+
+> **aarch64 gotchas.** On the board, run `pip install 'setuptools<81'` first — the
+> toolkit still imports `pkg_resources`, which setuptools 81 removed. And a `.rknn`
+> is **not** byte-reproducible: it embeds build metadata, so the same model
+> converted twice won't match by md5 (don't verify models by checksum).
+
+**RKNN has the same model/runtime version-lock as RKLLM.** Convert with a
+`rknn-toolkit2` on the **2.3.x** line (2.3.2 verified on-board) so it matches the
+bundled `librknnrt` runtime (Kiln pins **2.3.0**). A model converted with toolkit
+**2.1.0** threw `std::out_of_range` in `rknn_inputs_set` under `librknnrt` 2.3.0 —
+no crash in Kiln's code, purely the version mismatch. A 2.3.x-converted ONNX
+MobileNetV2 just works.
 
 ## Run
 
