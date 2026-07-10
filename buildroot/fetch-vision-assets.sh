@@ -30,6 +30,95 @@ else
 	echo "[kiln] -> model/test.jpg  and  model/imagenet_labels.txt ($(wc -l < "$MODEL/imagenet_labels.txt") classes)"
 fi
 
+# COCO-80 class labels for the EXPERIMENTAL detection path (task=detect). The class
+# names are a public factual list, generated inline (no network) so it's always here.
+# Idempotent. Point [vision] labels at this when you switch to a YOLO detector.
+if [ ! -s "$MODEL/coco_80_labels.txt" ]; then
+	cat > "$MODEL/coco_80_labels.txt" <<'COCO'
+person
+bicycle
+car
+motorcycle
+airplane
+bus
+train
+truck
+boat
+traffic light
+fire hydrant
+stop sign
+parking meter
+bench
+bird
+cat
+dog
+horse
+sheep
+cow
+elephant
+bear
+zebra
+giraffe
+backpack
+umbrella
+handbag
+tie
+suitcase
+frisbee
+skis
+snowboard
+sports ball
+kite
+baseball bat
+baseball glove
+skateboard
+surfboard
+tennis racket
+bottle
+wine glass
+cup
+fork
+knife
+spoon
+bowl
+banana
+apple
+sandwich
+orange
+broccoli
+carrot
+hot dog
+pizza
+donut
+cake
+chair
+couch
+potted plant
+bed
+dining table
+toilet
+tv
+laptop
+mouse
+remote
+keyboard
+cell phone
+microwave
+oven
+toaster
+sink
+refrigerator
+book
+clock
+vase
+scissors
+teddy bear
+hair drier
+toothbrush
+COCO
+	echo "[kiln] -> model/coco_80_labels.txt (80 classes, for task=detect)"
+fi
+
 # Optional: fetch a pre-converted default MobileNet .rknn so the install ends
 # ready-to-run for vision. The mobilenetv2-12 ONNX (Apache-2.0) and its rknn_model_zoo
 # recipe (Apache-2.0) make a converted .rknn license-clean to redistribute, but

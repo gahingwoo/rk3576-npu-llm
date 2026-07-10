@@ -57,6 +57,10 @@ _fetch(){ [ -s "$2" ] && { echo "[kiln] have $(basename "$2")"; return 0; };
           if command -v curl >/dev/null 2>&1; then curl -fsSL "$1" -o "$2"; else wget -qO "$2" "$1"; fi; }
 echo "[kiln] fetching stb_image.h (image decoder for the vision demo) ..."
 _fetch https://raw.githubusercontent.com/nothings/stb/master/stb_image.h "$DL/stb_image.h"
+# stb_image_write.h (public domain) lets kiln-vision save an annotated image with the
+# detection boxes drawn on it (the EXPERIMENTAL detect path). Optional -- the CLI
+# guards on __has_include, so a build without it just skips the --save feature.
+_fetch https://raw.githubusercontent.com/nothings/stb/master/stb_image_write.h "$DL/stb_image_write.h"
 
 # kiln-serve's HTTP + JSON: cpp-httplib and nlohmann/json, both single-header,
 # header-only, no runtime dependency (compile-time only). Pinned tags so the

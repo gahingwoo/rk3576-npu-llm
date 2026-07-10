@@ -180,6 +180,7 @@ vision_page() {
 	v_model=$(g model); v_labels=$(g labels); v_topn=$(g top_n)
 	v_core=$(g core_mask); v_prio=$(g priority)
 	v_task=$(g task); [ -n "$v_task" ] || v_task=classify
+	v_det=$(g detector); [ -n "$v_det" ] || v_det=auto
 	v_conf=$(g conf_threshold); [ -n "$v_conf" ] || v_conf=0.25
 	v_nms=$(g nms_iou); [ -n "$v_nms" ] || v_nms=0.45
 	MOD=0
@@ -189,6 +190,7 @@ vision_page() {
 			model      "$(short "$v_model")" \
 			labels     "$(short "$v_labels")" \
 			top_n      "$v_topn  (classify)" \
+			detector   "$v_det  (detect family)" \
 			conf       "$v_conf  (detect score threshold)" \
 			nms_iou    "$v_nms  (detect NMS IoU)" \
 			core_mask  "$v_core" \
@@ -211,6 +213,7 @@ vision_page() {
 				n=$(model_pick rknn "$v_model"); [ "$n" != "$v_model" ] && { v_model=$n; MOD=1; } ;;
 			labels)    edit_opt v_labels "Labels file (one per line; ImageNet-1000 for classify, COCO-80 for detect):" ;;
 			top_n)     n=$(input "How many top classes to print (classify):" "$v_topn"); setmod v_topn "$n" ;;
+			detector)  n=$(radio_pick "Detection family (auto detects from output shapes):" "$v_det" auto yolov8 yolov5 yolox); setmod v_det "$n" ;;
 			conf)      n=$(input "Detection score threshold 0-1 (task=detect):" "$v_conf"); setmod v_conf "$n" ;;
 			nms_iou)   n=$(input "Detection NMS IoU threshold 0-1 (task=detect):" "$v_nms"); setmod v_nms "$n" ;;
 			core_mask) n=$(radio_pick "NPU core mask (RK3576 has 2 cores):" "$v_core" auto 0 1 0_1); setmod v_core "$n" ;;
@@ -219,6 +222,7 @@ vision_page() {
 				kiln_ini_set "$CONF" vision model "$v_model"; kiln_ini_set "$CONF" vision labels "$v_labels"
 				kiln_ini_set "$CONF" vision top_n "$v_topn"; kiln_ini_set "$CONF" vision core_mask "$v_core"
 				kiln_ini_set "$CONF" vision priority "$v_prio"; kiln_ini_set "$CONF" vision task "$v_task"
+				kiln_ini_set "$CONF" vision detector "$v_det"
 				kiln_ini_set "$CONF" vision conf_threshold "$v_conf"; kiln_ini_set "$CONF" vision nms_iou "$v_nms"
 				MOD=0; msg "Saved to $CONF.\n\nApplies the next time you run kiln-vision / kiln-serve." ;;
 			BACK|"") vis_maybe_back && return ;;

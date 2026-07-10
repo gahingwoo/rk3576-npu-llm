@@ -551,7 +551,7 @@ else
 	fi
 
 	$SUDO mkdir -p /opt/models
-	for f in test.jpg imagenet_labels.txt "$MODEL_RKNN"; do
+	for f in test.jpg imagenet_labels.txt coco_80_labels.txt "$MODEL_RKNN"; do
 		[ -f "model/$f" ] && $SUDO install -m0644 "model/$f" /opt/models/ || true
 	done
 fi

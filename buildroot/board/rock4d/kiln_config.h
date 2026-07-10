@@ -46,6 +46,7 @@ struct KilnConfig {
     // detection knobs -- only used when task = detect (EXPERIMENTAL YOLOv8/11; the
     // default classify path ignores them). See kiln_detect.h / VISION.md.
     std::string vision_task      = "classify"; // classify | detect
+    std::string vision_detector  = "auto";     // auto | yolov8 | yolov5 | yolox
     float       vision_conf      = 0.25f;      // detection score threshold
     float       vision_nms_iou   = 0.45f;      // detection NMS IoU threshold
 
@@ -125,6 +126,7 @@ inline bool load(KilnConfig &c, const std::string &path = config_path()) {
         else if (key == "vision.core_mask")      c.vision_core_mask = v;
         else if (key == "vision.priority")       c.vision_priority = v;
         else if (key == "vision.task")           c.vision_task = v;
+        else if (key == "vision.detector")       c.vision_detector = v;
         else if (key == "vision.conf_threshold") c.vision_conf = (float)atof(v.c_str());
         else if (key == "vision.nms_iou")        c.vision_nms_iou = (float)atof(v.c_str());
         // Server
@@ -161,7 +163,8 @@ inline bool save(const KilnConfig &c, const std::string &path = config_path()) {
     f << "top_n = "             << c.vision_top_n << "\n";
     f << "core_mask = "         << c.vision_core_mask << "   # auto | 0 | 1 | 0_1\n";
     f << "priority = "          << c.vision_priority << "     # high | medium | low\n";
-    f << "task = "              << c.vision_task << "     # classify | detect (detect = EXPERIMENTAL YOLOv8/11)\n";
+    f << "task = "              << c.vision_task << "     # classify | detect (detect = EXPERIMENTAL)\n";
+    f << "detector = "          << c.vision_detector << "         # auto | yolov8 | yolov5 | yolox (task=detect)\n";
     f << "conf_threshold = "    << c.vision_conf << "   # detection score threshold (task=detect)\n";
     f << "nms_iou = "           << c.vision_nms_iou << "        # detection NMS IoU (task=detect)\n\n";
     f << "[server]\n";

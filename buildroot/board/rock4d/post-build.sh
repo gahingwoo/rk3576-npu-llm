@@ -120,6 +120,7 @@ mkdir -p "$TARGET_DIR/opt/models"
 # vision test image + ImageNet labels (small; always bake if present)
 [ -f "$KILN/model/test.jpg" ]            && install -m0644 "$KILN/model/test.jpg"            "$TARGET_DIR/opt/models/test.jpg"
 [ -f "$KILN/model/imagenet_labels.txt" ] && install -m0644 "$KILN/model/imagenet_labels.txt" "$TARGET_DIR/opt/models/imagenet_labels.txt"
+[ -f "$KILN/model/coco_80_labels.txt" ]  && install -m0644 "$KILN/model/coco_80_labels.txt"  "$TARGET_DIR/opt/models/coco_80_labels.txt"
 # MobileNet .rknn (small, ~6 MB) for the vision control experiment
 [ -f "$KILN/model/mobilenetv2-12_rk3576.rknn" ] \
 	&& install -m0644 "$KILN/model/mobilenetv2-12_rk3576.rknn" "$TARGET_DIR/opt/models/mobilenetv2-12_rk3576.rknn" \
