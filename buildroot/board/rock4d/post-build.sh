@@ -70,6 +70,15 @@ build_one "$KILN/buildroot/board/rock4d/rknn_mobilenet.cpp" "$TARGET_DIR/usr/bin
 # librknnrt.so alongside librkllmrt.so for the vision demo
 [ -f "$DL/librknnrt.so" ] && install -D -m0644 "$DL/librknnrt.so" "$TARGET_DIR/usr/lib/librknnrt.so"
 
+# kiln-doctor (POSIX sh, works on busybox) + kiln-config (needs whiptail; degrades
+# gracefully if it's not in the image) -- same diagnostic/config tools as the
+# Armbian installer. kiln-chat/kiln-vision and the login MOTD come from the rootfs
+# overlay (buildroot/rootfs/); these two live in scripts/, so install them here.
+for t in kiln-doctor kiln-config; do
+	[ -f "$KILN/scripts/$t" ] && install -D -m0755 "$KILN/scripts/$t" "$TARGET_DIR/usr/bin/$t" \
+		&& echo "[kiln] installed $t -> /usr/bin/"
+done
+
 # --- 2c. bake the driver-environment probe (needs the ftrace kernel above) ---
 # capture/env-trace.sh = the vendor-vs-rocket same-kernel environment diff; POSIX
 # sh so it runs on the busybox image. Installed as /usr/bin/kiln-env-trace.
