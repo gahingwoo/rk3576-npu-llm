@@ -18,6 +18,23 @@
 #     demos. No DT overlay -- the NPU node is already in the dtb.
 #
 # You supply the model files (a *-rk3576-w4a16.rkllm and/or a *_rk3576.rknn).
+#
+# Granular re-runs: by default every run does ALL of phase 2 (repo pull, DKMS
+# driver rebuild, runtimes+demos), even when only one of those actually changed
+# -- e.g. you edited driver/rknpu/*.c and just want it rebuilt, not a fresh
+# runtime download + demo recompile too. Skip whichever stages you don't need:
+#
+#   KILN_SKIP_KERNEL=1    skip the phase-1 kernel check/install entirely
+#   KILN_SKIP_REPO=1      don't touch $KILN_DIR (use it exactly as it is on
+#                          disk -- e.g. a local patch you don't want `git pull`
+#                          to fast-forward over)
+#   KILN_SKIP_DRIVER=1    don't rebuild/reinstall the rknpu DKMS module
+#   KILN_SKIP_RUNTIMES=1  don't re-fetch RKLLM/RKNN runtimes or rebuild the
+#                          demos/kiln-serve (the slow, network-heavy part)
+#
+# A driver-only run (KILN_SKIP_RUNTIMES=1, kernel unchanged) reloads the module
+# itself (rmmod+modprobe) instead of asking for a reboot. KILN_FORCE_KERNEL=1
+# still forces a kernel reinstall regardless of the above.
 set -euo pipefail
 
 REPO="${KILN_REPO:-https://github.com/gahingwoo/kiln.git}"
@@ -171,7 +188,11 @@ on_patched_kernel(){
 	[ "$(sed -n 2p "$MARKER" 2>/dev/null)" = "$want" ]
 }
 
-if ! on_patched_kernel; then
+KERNEL_CHANGED=0
+if [ -n "${KILN_SKIP_KERNEL:-}" ]; then
+	say "KILN_SKIP_KERNEL set — skipping the kernel check/install; assuming $KREL is fine."
+elif ! on_patched_kernel; then
+	KERNEL_CHANGED=1
 	say "installing the Kiln mainline NPU kernel from the '$KTAG' release ..."
 	TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 	# exclude the -dbg debug-symbol image (bindeb-pkg builds it; ~hundreds of MB,
@@ -212,35 +233,71 @@ fi
 say "on the Kiln-patched kernel ($KREL) — finishing the install."
 
 # --- 3. fetch Kiln ----------------------------------------------------------
-say "fetching Kiln into $KILN_DIR ..."
-if [ -d "$KILN_DIR/.git" ]; then $SUDO git -C "$KILN_DIR" pull --ff-only || true
-else $SUDO rm -rf "$KILN_DIR"; $SUDO git clone --depth 1 "$REPO" "$KILN_DIR"; fi
-# Cloned as root, but fetch-runtimes / g++ demos run as you and write back into
-# the tree (buildroot/dl, model/); hand it over so those writes don't EPERM.
-$SUDO chown -R "$(id -u):$(id -g)" "$KILN_DIR"
+if [ -n "${KILN_SKIP_REPO:-}" ]; then
+	[ -d "$KILN_DIR" ] || die "KILN_SKIP_REPO set but $KILN_DIR doesn't exist yet -- need it once without the skip."
+	say "KILN_SKIP_REPO set — using $KILN_DIR as-is (no git pull/clone)."
+else
+	say "fetching Kiln into $KILN_DIR ..."
+	if [ -d "$KILN_DIR/.git" ]; then $SUDO git -C "$KILN_DIR" pull --ff-only || true
+	else $SUDO rm -rf "$KILN_DIR"; $SUDO git clone --depth 1 "$REPO" "$KILN_DIR"; fi
+	# Cloned as root, but fetch-runtimes / g++ demos run as you and write back into
+	# the tree (buildroot/dl, model/); hand it over so those writes don't EPERM.
+	$SUDO chown -R "$(id -u):$(id -g)" "$KILN_DIR"
+fi
 cd "$KILN_DIR"
 
-# --- 4. driver via DKMS -----------------------------------------------------
-# Headers came WITH the patched kernel (linux-headers deb), so this always matches.
-[ -d "/lib/modules/$KREL/build" ] \
-	|| die "no kernel headers for $KREL (the patched linux-headers deb should provide them)."
-say "building the rknpu driver with DKMS (fetches GPL source + applies the patch) ..."
-$SUDO rm -rf "/usr/src/$PKG-$VER"; $SUDO mkdir -p "/usr/src/$PKG-$VER"
-$SUDO cp -r Kbuild Makefile dkms.conf driver "/usr/src/$PKG-$VER/"
-$SUDO dkms remove "$PKG/$VER" --all >/dev/null 2>&1 || true
-$SUDO dkms add "/usr/src/$PKG-$VER"
-$SUDO dkms build "$PKG/$VER"
-$SUDO dkms install "$PKG/$VER"
-# Load rknpu at boot (loading a module needs root; the dtb's NPU node is up before
-# userspace, so a boot-time modprobe binds it and the render node is ready).
-echo rknpu | $SUDO tee /etc/modules-load.d/rknpu.conf >/dev/null
+DRIVER_REBUILT=0
+if [ -n "${KILN_SKIP_DRIVER:-}" ]; then
+	say "KILN_SKIP_DRIVER set — leaving the installed rknpu module as-is."
+else
+	# --- 4. driver via DKMS -----------------------------------------------------
+	# Headers came WITH the patched kernel (linux-headers deb), so this always matches.
+	[ -d "/lib/modules/$KREL/build" ] \
+		|| die "no kernel headers for $KREL (the patched linux-headers deb should provide them)."
+	say "building the rknpu driver with DKMS (fetches GPL source + applies the patch) ..."
+	# NOTE: dkms.conf's PRE_BUILD (driver/fetch-vendor-driver.sh) re-fetches the
+	# vendor source and reapplies the mainline shims on EVERY build, overwriting
+	# whatever is in driver/rknpu/ first -- including a local hand-edit you made
+	# there. If you're testing a local driver patch, don't go through DKMS at all:
+	# build it directly (make ARCH=arm64 KDIR=/lib/modules/$(uname -r)/build) and
+	# insmod the resulting rknpu.ko, or fold the patch into fetch-vendor-driver.sh
+	# so PRE_BUILD reproduces it.
+	$SUDO rm -rf "/usr/src/$PKG-$VER"; $SUDO mkdir -p "/usr/src/$PKG-$VER"
+	$SUDO cp -r Kbuild Makefile dkms.conf driver "/usr/src/$PKG-$VER/"
+	$SUDO dkms remove "$PKG/$VER" --all >/dev/null 2>&1 || true
+	$SUDO dkms add "/usr/src/$PKG-$VER"
+	$SUDO dkms build "$PKG/$VER"
+	$SUDO dkms install "$PKG/$VER"
+	# Load rknpu at boot (loading a module needs root; the dtb's NPU node is up before
+	# userspace, so a boot-time modprobe binds it and the render node is ready).
+	echo rknpu | $SUDO tee /etc/modules-load.d/rknpu.conf >/dev/null
+	DRIVER_REBUILT=1
 
-# Restore onboard wifi/bt on the mainline kernel (the stock aic8800 doesn't build
-# on 7.1; Kiln's patch does). Best-effort -- the NPU install does not depend on it.
-# aic8800 is the ROCK 4D (RK3576) radio; the ROCK 3B uses a different one, so only
-# run it there.
-[ "$SOC" = rk3576 ] && install_patched_aic8800 "$KREL" \
-	|| say "wifi: skipping aic8800 (only on the ROCK 4D / rk3576)."
+	# Restore onboard wifi/bt on the mainline kernel (the stock aic8800 doesn't build
+	# on 7.1; Kiln's patch does). Best-effort -- the NPU install does not depend on it.
+	# aic8800 is the ROCK 4D (RK3576) radio; the ROCK 3B uses a different one, so only
+	# run it there.
+	[ "$SOC" = rk3576 ] && install_patched_aic8800 "$KREL" \
+		|| say "wifi: skipping aic8800 (only on the ROCK 4D / rk3576)."
+fi
+
+# If only the driver changed (no kernel change this run), reload it in place
+# instead of asking for a reboot -- rmmod+modprobe picks up the freshly
+# installed module immediately. Best-effort: if something has the render node
+# open, fall back to asking for a reboot.
+DRIVER_RELOADED=0
+if [ "$DRIVER_REBUILT" = 1 ] && [ "$KERNEL_CHANGED" = 0 ]; then
+	if $SUDO rmmod rknpu 2>/dev/null; then
+		if $SUDO modprobe rknpu; then
+			DRIVER_RELOADED=1
+			say "rknpu reloaded (no reboot needed)."
+		else
+			say "WARN: rknpu unloaded but failed to reload -- reboot to bring it back."
+		fi
+	else
+		say "rknpu is in use (or wasn't loaded) -- couldn't hot-reload it; reboot to load the new build."
+	fi
+fi
 
 # --- 5. NPU device-tree node -------------------------------------------------
 # Nothing to do: on the mainline kernel the vendor NPU node is compiled into the
@@ -249,50 +306,55 @@ echo rknpu | $SUDO tee /etc/modules-load.d/rknpu.conf >/dev/null
 say "NPU node is built into the mainline dtb (no overlay needed)."
 
 # --- 6. runtimes + demos (native aarch64 build) + vision assets --------------
-say "fetching runtimes and building the demos ..."
-bash buildroot/fetch-runtimes.sh
-bash buildroot/fetch-vision-assets.sh || true
-DL="$KILN_DIR/buildroot/dl"
-for so in librkllmrt.so librknnrt.so libgomp.so.1; do
-	[ -f "$DL/$so" ] && $SUDO install -m0644 "$DL/$so" /usr/lib/ || true
-done
-[ -f "$DL/libgomp.so.1" ] || say "note: libgomp.so.1 not staged; librkllmrt will use the system one if present"
+if [ -n "${KILN_SKIP_RUNTIMES:-}" ]; then
+	say "KILN_SKIP_RUNTIMES set — leaving runtimes/demos/models as installed."
+	DL="$KILN_DIR/buildroot/dl"
+else
+	say "fetching runtimes and building the demos ..."
+	bash buildroot/fetch-runtimes.sh
+	bash buildroot/fetch-vision-assets.sh || true
+	DL="$KILN_DIR/buildroot/dl"
+	for so in librkllmrt.so librknnrt.so libgomp.so.1; do
+		[ -f "$DL/$so" ] && $SUDO install -m0644 "$DL/$so" /usr/lib/ || true
+	done
+	[ -f "$DL/libgomp.so.1" ] || say "note: libgomp.so.1 not staged; librkllmrt will use the system one if present"
 
-if [ -f "$DL/rkllm.h" ]; then
-	# line editing + history in kiln-chat needs readline; use it if the header is
-	# present, otherwise fall back to a plain line read (no cursor/history). The
-	# -D define goes before the source; -lreadline MUST come AFTER it (ld resolves
-	# libs against objects already seen), so it goes at the end with the other libs.
-	RLDEF=""; RLLIB=""
-	printf '#include <readline/readline.h>\n' | g++ -E - >/dev/null 2>&1 && { RLDEF="-DKILN_USE_READLINE"; RLLIB="-lreadline"; }
-	g++ -include cstdint $RLDEF buildroot/board/rock4d/rkllm_chat.cpp -I "$DL" -L "$DL" \
-		-Wl,-rpath-link,"$DL" -lrkllmrt -lpthread $RLLIB -o /tmp/rkllm_demo \
-	  && $SUDO install -m0755 /tmp/rkllm_demo /usr/bin/rkllm_demo || say "WARN: rkllm_demo build failed"
-fi
-if [ -f "$DL/rknn_api.h" ]; then
-	g++ buildroot/board/rock4d/rknn_mobilenet.cpp -I "$DL" -L "$DL" \
-		-Wl,-rpath-link,"$DL" -lrknnrt -lpthread -lm -o /tmp/rknn_mobilenet \
-	  && $SUDO install -m0755 /tmp/rknn_mobilenet /usr/bin/rknn_mobilenet || say "WARN: rknn_mobilenet build failed"
-fi
-# kiln-serve: OpenAI-compatible API server (LLM + optional vision). Header-only
-# httplib+json, links the same librkllmrt/librknnrt. Reuses kiln_llm/vision/config.
-if [ -f "$DL/rkllm.h" ] && [ -f "$DL/httplib.h" ] && [ -f "$DL/json.hpp" ]; then
-	g++ -std=c++17 -O2 buildroot/board/rock4d/kiln_serve.cpp -I "$DL" -L "$DL" \
-		-Wl,-rpath-link,"$DL" -lrkllmrt -lrknnrt -lpthread -lm -o /tmp/kiln-serve \
-	  && $SUDO install -m0755 /tmp/kiln-serve /usr/bin/kiln-serve || say "WARN: kiln-serve build failed"
-fi
-$SUDO install -m0755 buildroot/rootfs/usr/bin/kiln-chat buildroot/rootfs/usr/bin/kiln-vision /usr/bin/
-# optional systemd unit for kiln-serve
-if [ -f buildroot/rootfs/etc/systemd/system/kiln-serve.service ] && [ -d /etc/systemd/system ]; then
-	$SUDO install -m0644 buildroot/rootfs/etc/systemd/system/kiln-serve.service /etc/systemd/system/
-	$SUDO systemctl daemon-reload 2>/dev/null || true
-	say "kiln-serve.service installed (disabled). Enable with: sudo systemctl enable --now kiln-serve"
-fi
+	if [ -f "$DL/rkllm.h" ]; then
+		# line editing + history in kiln-chat needs readline; use it if the header is
+		# present, otherwise fall back to a plain line read (no cursor/history). The
+		# -D define goes before the source; -lreadline MUST come AFTER it (ld resolves
+		# libs against objects already seen), so it goes at the end with the other libs.
+		RLDEF=""; RLLIB=""
+		printf '#include <readline/readline.h>\n' | g++ -E - >/dev/null 2>&1 && { RLDEF="-DKILN_USE_READLINE"; RLLIB="-lreadline"; }
+		g++ -include cstdint $RLDEF buildroot/board/rock4d/rkllm_chat.cpp -I "$DL" -L "$DL" \
+			-Wl,-rpath-link,"$DL" -lrkllmrt -lpthread $RLLIB -o /tmp/rkllm_demo \
+		  && $SUDO install -m0755 /tmp/rkllm_demo /usr/bin/rkllm_demo || say "WARN: rkllm_demo build failed"
+	fi
+	if [ -f "$DL/rknn_api.h" ]; then
+		g++ buildroot/board/rock4d/rknn_mobilenet.cpp -I "$DL" -L "$DL" \
+			-Wl,-rpath-link,"$DL" -lrknnrt -lpthread -lm -o /tmp/rknn_mobilenet \
+		  && $SUDO install -m0755 /tmp/rknn_mobilenet /usr/bin/rknn_mobilenet || say "WARN: rknn_mobilenet build failed"
+	fi
+	# kiln-serve: OpenAI-compatible API server (LLM + optional vision). Header-only
+	# httplib+json, links the same librkllmrt/librknnrt. Reuses kiln_llm/vision/config.
+	if [ -f "$DL/rkllm.h" ] && [ -f "$DL/httplib.h" ] && [ -f "$DL/json.hpp" ]; then
+		g++ -std=c++17 -O2 buildroot/board/rock4d/kiln_serve.cpp -I "$DL" -L "$DL" \
+			-Wl,-rpath-link,"$DL" -lrkllmrt -lrknnrt -lpthread -lm -o /tmp/kiln-serve \
+		  && $SUDO install -m0755 /tmp/kiln-serve /usr/bin/kiln-serve || say "WARN: kiln-serve build failed"
+	fi
+	$SUDO install -m0755 buildroot/rootfs/usr/bin/kiln-chat buildroot/rootfs/usr/bin/kiln-vision /usr/bin/
+	# optional systemd unit for kiln-serve
+	if [ -f buildroot/rootfs/etc/systemd/system/kiln-serve.service ] && [ -d /etc/systemd/system ]; then
+		$SUDO install -m0644 buildroot/rootfs/etc/systemd/system/kiln-serve.service /etc/systemd/system/
+		$SUDO systemctl daemon-reload 2>/dev/null || true
+		say "kiln-serve.service installed (disabled). Enable with: sudo systemctl enable --now kiln-serve"
+	fi
 
-$SUDO mkdir -p /opt/models
-for f in test.jpg imagenet_labels.txt "$MODEL_RKNN"; do
-	[ -f "model/$f" ] && $SUDO install -m0644 "model/$f" /opt/models/ || true
-done
+	$SUDO mkdir -p /opt/models
+	for f in test.jpg imagenet_labels.txt "$MODEL_RKNN"; do
+		[ -f "model/$f" ] && $SUDO install -m0644 "model/$f" /opt/models/ || true
+	done
+fi
 
 # Seed the unified config (if absent) so kiln-chat/vision/serve/settings share
 # one source of truth. The tools also work with no file (built-in defaults);
@@ -336,9 +398,10 @@ fi
 
 # --- 7. finish --------------------------------------------------------------
 $SUDO depmod -a "$KREL" || true
-cat <<EOF
+if [ "$KERNEL_CHANGED" = 1 ] || { [ "$DRIVER_REBUILT" = 1 ] && [ "$DRIVER_RELOADED" = 0 ]; }; then
+	cat <<EOF
 
-[kiln] Installed on the mainline NPU kernel. REBOOT to load rknpu against the NPU node:
+[kiln] Installed. REBOOT to load rknpu against the NPU node:
 
     sudo reboot
 
@@ -347,6 +410,16 @@ After reboot:
       # expect:  RKNPU ... kiln mmu enable_all: ... st=0x19/0x19/0x19/0x19
       # and NO   'failed to get pm runtime for npu0, ret: -110'
   ls /dev/dri/renderD*          # renderD129 (NPU) present
+EOF
+else
+	cat <<EOF
+
+[kiln] Installed. No reboot needed ($([ "$DRIVER_RELOADED" = 1 ] && echo "rknpu already reloaded" || echo "driver unchanged this run")).
+  sudo dmesg | grep -i rknpu   # confirm the version/state you expect
+  ls /dev/dri/renderD*         # renderD129 (NPU) present
+EOF
+fi
+cat <<EOF
 
   # vision (needs a MobileNet .rknn matched to librknnrt 2.3.0 in /opt/models):
   kiln-vision /opt/models/test.jpg
