@@ -221,7 +221,7 @@ vision_page() {
 				n=$(model_pick rknn "$v_model"); [ "$n" != "$v_model" ] && { v_model=$n; MOD=1; } ;;
 			labels)    edit_opt v_labels "Labels file (one per line; ImageNet-1000 for classify, COCO-80 for detect):" ;;
 			top_n)     n=$(input "How many top classes to print (classify):" "$v_topn"); setmod v_topn "$n" ;;
-			detector)  n=$(radio_pick "Detection family (auto detects from output shapes):" "$v_det" auto yolov8 yolov5 yolox end2end); setmod v_det "$n" ;;
+			detector)  n=$(radio_pick "Detection family (auto detects from output shapes):" "$v_det" auto yolov8 yolov5 yolox yoloraw end2end); setmod v_det "$n" ;;
 			conf)      n=$(input "Detection score threshold 0-1 (task=detect):" "$v_conf"); setmod v_conf "$n" ;;
 			nms_iou)   n=$(input "Detection NMS IoU threshold 0-1 (task=detect):" "$v_nms"); setmod v_nms "$n" ;;
 			core_mask) n=$(radio_pick "NPU core mask (RK3576 has 2 cores):" "$v_core" auto 0 1 0_1); setmod v_core "$n" ;;

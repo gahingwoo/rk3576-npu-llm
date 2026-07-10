@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // kiln_detect.h -- EXPERIMENTAL object-detection foundation for the RK3576 NPU via
 // librknnrt (RKNN). YOLOv8/YOLO11 (anchor-free DFL), YOLOv5/v7 (anchor-based), YOLOX
-// (anchor-free + objectness), and END2END / NMS-in-model exports (Ultralytics
-// YOLO26, YOLOv10) whose single [1,N,6] output is already decoded + NMS'd.
+// (anchor-free + objectness), and YOLO-RAW: a decoded pre-NMS single output
+// [1,N,4+ncls] (Ultralytics nms=False, e.g. YOLO26/YOLOv10) -- the format that runs
+// on the RK3576 NPU (pure conv; CPU does NMS). (An END2END [1,N,6] NMS-in-model
+// export also has a decoder but CRASHES on the NPU -- the NMS ops aren't supported.)
 //
 //   *** EXPERIMENTAL -- the decoders are UNIT-TESTED on the host with synthetic
 //       tensors, but NOT yet verified end-to-end against a real model on a board. ***
@@ -48,7 +50,8 @@
 struct KilnBox { float x1, y1, x2, y2; };                    // pixels in the ORIGINAL image
 struct KilnDetection { KilnBox box; int class_id; std::string label; float score; };
 struct KilnLetterbox { float scale; int pad_x, pad_y; int in_w, in_h; };
-enum KilnDetector { KILN_DET_AUTO = 0, KILN_DET_YOLOV8, KILN_DET_YOLOV5, KILN_DET_YOLOX, KILN_DET_END2END };
+enum KilnDetector { KILN_DET_AUTO = 0, KILN_DET_YOLOV8, KILN_DET_YOLOV5, KILN_DET_YOLOX,
+                    KILN_DET_END2END, KILN_DET_YOLORAW };
 
 class KilnDetect {
 public:
@@ -158,9 +161,11 @@ public:
         }
     }
 
-    // End2end / NMS-free YOLO (Ultralytics YOLO26, YOLOv10, ...). ONE output tensor
-    // [1, N, 6]: N rows of [x1, y1, x2, y2, score, class_id] in MODEL coords, already
-    // NMS'd inside the model. So: threshold + un-letterbox only, no CPU decode/NMS.
+    // End2end / NMS-in-model YOLO. ONE output [1, N, 6]: N rows of
+    // [x1, y1, x2, y2, score, class_id] in MODEL coords, already NMS'd. Just threshold
+    // + un-letterbox. NOTE: the in-model NMS ops (TopK/GatherElements) do NOT run on
+    // the RK3576 NPU -- an end2end .rknn CRASHES librknnrt. Export with NMS OFF and use
+    // KILN_DET_YOLORAW instead. This decoder is kept for a runtime that ever supports it.
     static void decode_end2end_branch(const float *data, int num_rows, float conf,
                                       const std::vector<std::string> &labels, std::vector<KilnDetection> &out) {
         for (int i = 0; i < num_rows; i++) {
@@ -169,6 +174,23 @@ public:
             if (score < conf) continue;
             int cls = (int)(r[5] + 0.5f);
             out.push_back({{r[0], r[1], r[2], r[3]}, cls, label_of(labels, cls), score});
+        }
+    }
+
+    // Decoded-but-NOT-NMS'd single output [1, N, 4+ncls]: per anchor
+    // [x1, y1, x2, y2, cls0..clsN] with the box already xyxy in MODEL coords. This is
+    // the Ultralytics `nms=False` export (or an end2end graph cut before the NMS tail)
+    // and is the format that runs cleanly on the RK3576 NPU (pure conv). Threshold by
+    // the max class; the caller un-letterboxes and runs CPU NMS.
+    static void decode_yoloraw_branch(const float *data, int num_rows, int ncols, float conf,
+                                      const std::vector<std::string> &labels, std::vector<KilnDetection> &out) {
+        int nc = ncols - 4;
+        for (int i = 0; i < num_rows; i++) {
+            const float *r = data + i * ncols;
+            int best = -1; float bestp = conf;
+            for (int c = 0; c < nc; c++) { float p = r[4 + c]; if (p > bestp) { bestp = p; best = c; } }
+            if (best < 0) continue;
+            out.push_back({{r[0], r[1], r[2], r[3]}, best, label_of(labels, best), bestp});
         }
     }
 
@@ -294,12 +316,14 @@ public:
         if (s == "yolov8" || s == "yolo11" || s == "yolov11")   return KILN_DET_YOLOV8;
         if (s == "yolov5" || s == "yolov7")                     return KILN_DET_YOLOV5;
         if (s == "yolox")                                       return KILN_DET_YOLOX;
-        if (s == "end2end" || s == "yolov10" || s == "yolo26")  return KILN_DET_END2END;
+        if (s == "end2end")                                     return KILN_DET_END2END;
+        if (s == "yoloraw" || s == "raw" || s == "yolo26" || s == "yolov10") return KILN_DET_YOLORAW;
         return KILN_DET_AUTO;
     }
     static const char *det_name(KilnDetector f) {
         switch (f) { case KILN_DET_YOLOV8: return "yolov8/11"; case KILN_DET_YOLOV5: return "yolov5/7";
-                     case KILN_DET_YOLOX: return "yolox"; case KILN_DET_END2END: return "end2end"; default: return "auto"; }
+                     case KILN_DET_YOLOX: return "yolox"; case KILN_DET_END2END: return "end2end";
+                     case KILN_DET_YOLORAW: return "yolo-raw (xyxy)"; default: return "auto"; }
     }
 
 private:
@@ -323,7 +347,9 @@ private:
     KilnDetector auto_family() const {
         if (io_.n_output == 1) {                                            // one output
             const rknn_tensor_attr &a = out_attrs_[0];
-            if (a.n_dims >= 2 && a.dims[a.n_dims - 1] == 6) return KILN_DET_END2END;  // [1,N,6] NMS-in-model
+            int last = a.n_dims >= 1 ? (int)a.dims[a.n_dims - 1] : 0;
+            if (a.n_dims >= 2 && last == 6) return KILN_DET_END2END;        // [1,N,6] NMS-in-model
+            if (a.n_dims >= 2 && last  > 6) return KILN_DET_YOLORAW;        // [1,N,4+ncls] decoded, pre-NMS
         }
         if (io_.n_output == 6 || io_.n_output == 9) return KILN_DET_YOLOV8;
         if (io_.n_output == 3) {
@@ -336,11 +362,13 @@ private:
 
     void decode(const std::vector<rknn_output> &outs, float conf, std::vector<KilnDetection> &out) {
         KilnDetector fam = family_ == KILN_DET_AUTO ? auto_family() : family_;
-        if (fam == KILN_DET_END2END) {
+        if (fam == KILN_DET_END2END || fam == KILN_DET_YOLORAW) {
             const rknn_tensor_attr &a = out_attrs_[0];
-            int rows = a.n_dims >= 2 ? (int)a.dims[a.n_dims - 2] : 0;       // [1,N,6] -> N
-            int cols = a.n_dims >= 1 ? (int)a.dims[a.n_dims - 1] : 0;       // -> 6
-            if (cols == 6 && rows > 0) decode_end2end_branch((const float *)outs[0].buf, rows, conf, labels_, out);
+            int rows = a.n_dims >= 2 ? (int)a.dims[a.n_dims - 2] : 0;       // [1,N,C] -> N
+            int cols = a.n_dims >= 1 ? (int)a.dims[a.n_dims - 1] : 0;       // -> C
+            if (rows <= 0) return;
+            if (fam == KILN_DET_END2END && cols == 6) decode_end2end_branch((const float *)outs[0].buf, rows, conf, labels_, out);
+            else if (fam == KILN_DET_YOLORAW && cols > 4) decode_yoloraw_branch((const float *)outs[0].buf, rows, cols, conf, labels_, out);
             return;
         }
         if (fam == KILN_DET_YOLOV8) {

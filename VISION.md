@@ -87,17 +87,26 @@ image + labels. A `mobilenetv2-12_rk3576.rknn` in `model/` is baked to `/opt/mod
 The vision path is **classification only** by default. A separate, experimental
 detection path lives in `buildroot/board/rock4d/kiln_detect.h`, kept apart from the
 classifier so the working classify path is untouched. It is enabled by
-`[vision] task = detect` and supports four YOLO families: **YOLOv8 / YOLO11**
+`[vision] task = detect` and supports these YOLO families: **YOLOv8 / YOLO11**
 (anchor-free, DFL), **YOLOv5 / YOLOv7** (anchor-based), **YOLOX** (anchor-free +
-objectness), and **end2end / NMS-in-model** exports (Ultralytics **YOLO26**,
-**YOLOv10**) whose single `[1, N, 6]` output is already decoded + NMS'd inside the
-model. `detector = auto` picks the family from the model's output shapes; you can
-force it (`yolov8` / `yolov5` / `yolox` / `end2end`).
+objectness), and **yolo-raw** — a *decoded but not-NMS'd* single `[1, N, 4+ncls]`
+output (Ultralytics `nms=False`, e.g. **YOLO26 / YOLOv10**): the box is already
+`xyxy`, Kiln thresholds by the max class and does NMS on the CPU. `detector = auto`
+picks the family from the output shapes; force it with
+`yolov8`/`yolov5`/`yolox`/`yoloraw`.
 
-> An end2end export (e.g. `yolo model=... format=onnx nms=True`) is the easiest to
-> convert: `rknn-toolkit2` 2.3.2 turns the whole graph (NMS included) into a `.rknn`
-> whose output is the final boxes — Kiln just thresholds + un-letterboxes them. Note
-> the in-model NMS ops (TopK/GatherElements) may run partly on CPU; verify on-board.
+> **Export with NMS OFF.** An `nms=True` / **end2end** export bakes the NMS into the
+> model (`[1, N, 6]` output). rknn-toolkit2 *converts* it, but the in-model NMS ops
+> (TopK / GatherElements) **do NOT run on the RK3576 NPU — the `.rknn` crashes
+> librknnrt** (confirmed on-board; classification on the same box works). So export
+> raw:
+> ```sh
+> yolo export model=yolo26n.pt format=onnx nms=False opset=19 imgsz=640
+> ```
+> then convert (`rknn-toolkit2` 2.3.x, `mean=[0,0,0] std=[255,255,255]`,
+> `do_quantization=False`). Kiln's `yolo-raw` decoder handles the `[1,N,4+ncls]`
+> output. (If you only have an end2end `.onnx`, you can cut the graph at the
+> pre-NMS tensor — for Ultralytics that's the `Transpose` output `[1, N, 84]`.)
 
 What's **verified on the host** (unit tests, no NPU): the letterbox preprocessing +
 its inverse box mapping, IoU, per-class NMS, box drawing, AND all three per-branch
