@@ -18,6 +18,17 @@ mainline**: those ten patches are required (see *Why it needs kernel patches*).
 > (rocket / mesa). Two routes to the same goal: this repo puts the vendor stack on
 > a mainline kernel; that one builds an open driver from scratch.
 
+## Is this for you?
+
+- **You have** a Radxa **ROCK 4D (RK3576)** — or a **ROCK 3B (RK3568)**, vision-only
+  and untested (help wanted) — running **Armbian**.
+- **You want** local **LLM + vision** inference on the NPU on a **mainline** kernel,
+  not the vendor 6.1 BSP.
+- **You get** one command → `kiln-chat`, `kiln-vision`, `kiln-serve` (OpenAI-compatible
+  API), plus `kiln-config` (TUI) and `kiln-doctor` (health check).
+- **Not for you** if you're staying on the vendor **6.1 BSP** kernel, or if you need
+  **object detection / YOLO** — the vision path is **image classification only** today.
+
 ## Status
 
 **It works** on real hardware (ROCK 4D, RK3576). Both stacks run on the NPU:
@@ -85,17 +96,40 @@ Three tools, one config (`/etc/kiln/config.ini`, read by all of them):
 - **`kiln-vision`** — the image-classification CLI (MobileNet / RKNN). See
   [`VISION.md`](VISION.md).
 
-All three read `/etc/kiln/config.ini` — edited by hand; only the fields the closed
-runtimes actually expose. See [`docs/CONFIG.md`](docs/CONFIG.md).
+- **`kiln-config`** — a `whiptail` TUI front-end to the config (Status & diagnostics,
+  LLM and vision settings), modelled on `armbian-config`. It edits `config.ini` in
+  place, so your hand edits and comments survive.
+- **`kiln-doctor`** — a plain-English ✓/✗ health check (driver loaded, MMU banks,
+  models present + version-matched, …). Exits non-zero on any critical fault, so
+  it's the "paste this before opening an issue" tool.
+
+All of these read `/etc/kiln/config.ini` — edited by hand (or via `kiln-config`);
+only the fields the closed runtimes actually expose. See [`docs/CONFIG.md`](docs/CONFIG.md).
 
 ## Install
 
-**On Armbian** — one command installs the Kiln mainline kernel, then (after a
-reboot) the driver + runtimes + tools. Two phases; see [`ARMBIAN.md`](ARMBIAN.md):
+**On Armbian** — one command, then walk away. It pre-downloads everything, installs
+the Kiln mainline kernel, and **reboots itself twice (~10–15 min total)** to finish
+setup and land in a ready system. **This is normal — don't cut power.** Onboard wifi
+is down between the reboots (expected); phase 2 runs offline, so it doesn't need it.
+When it's done you'll see a "Kiln installed" note at login (or run `kiln-doctor`).
+See [`ARMBIAN.md`](ARMBIAN.md).
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/gahingwoo/kiln/main/scripts/kiln-install.sh | bash
 ```
+
+Prefer not to pipe a kernel-installing script straight into a shell? Download it,
+read it, then run it — it's meant to be inspected:
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/gahingwoo/kiln/main/scripts/kiln-install.sh
+less kiln-install.sh          # read what it does
+bash kiln-install.sh          # then run it
+```
+
+Want to keep control of the reboots? `KILN_MANUAL=1 bash kiln-install.sh` does the
+two phases by hand (it tells you when to reboot and re-run) instead of auto-continuing.
 
 **Flashable image** — the whole thing as a buildroot br2-external (rootfs + module
 + model baked in):
