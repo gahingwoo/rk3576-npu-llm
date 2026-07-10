@@ -1,0 +1,241 @@
+#!/bin/sh
+# kiln-config -- a whiptail (fallback: dialog) TUI front-end to /etc/kiln/config.ini
+# and the kiln tools, modelled on armbian-config. It is a FRONT-END: config.ini
+# stays the hand-editable single source of truth, and every write goes through an
+# in-place editor that preserves comments and unknown fields (never a full rewrite).
+#
+# Design rules honored here:
+#   * <Save> writes, <Back> discards -- nothing is persisted until you confirm.
+#   * model pickers SCAN /opt/models (no path typing); enums are radio lists.
+#   * vision is CLASSIFICATION-ONLY -- the picker says so; no YOLO/detection claim.
+#   * needs root to edit /etc/kiln/config.ini and to read dmesg -> re-exec via sudo.
+#
+# Batch 1 (this file): Status & Diagnostics, LLM Settings, Vision Settings.
+# Batch 2 (Models / Server / Advanced) are present as clearly-marked stubs.
+
+CONF="${KILN_CONFIG:-/etc/kiln/config.ini}"
+MODELS_DIR="${KILN_MODELS_DIR:-/opt/models}"
+
+# whiptail, or dialog as a fallback
+UI=whiptail
+command -v whiptail >/dev/null 2>&1 || UI=dialog
+command -v "$UI" >/dev/null 2>&1 || { echo "kiln-config needs 'whiptail' (or 'dialog'): sudo apt install whiptail" >&2; exit 1; }
+
+# Root for editing $CONF (root-owned) and for kiln-doctor's dmesg read. Re-exec via
+# sudo, forwarding KILN_CONFIG so a custom path survives the privilege change.
+if [ "$(id -u)" -ne 0 ]; then
+	command -v sudo >/dev/null 2>&1 || { echo "kiln-config must run as root (to edit $CONF)." >&2; exit 1; }
+	exec sudo KILN_CONFIG="$CONF" KILN_MODELS_DIR="$MODELS_DIR" "$0" "$@"
+fi
+
+# ---------------------------------------------------------------------------
+# INI helpers -- the same "present -> replace in place / absent -> append to the
+# CORRECT section end" logic that avoids the silent no-op of a naive sed. Values
+# are written as awk literals, so /, &, # in a system_prompt can't corrupt the file.
+# (Round-trips a hand-edited config: comments + unknown fields are preserved.)
+# ---------------------------------------------------------------------------
+kiln_ini_set() {
+	f=$1; sec=$2; key=$3; val=$4
+	[ -f "$f" ] || : > "$f" || return 1
+	t=$(mktemp) || return 1
+	awk -v section="$sec" -v key="$key" -v value="$val" '
+		BEGIN { in_t=0; done=0 }
+		/^[ \t]*\[.*\][ \t]*$/ {
+			if (in_t && !done) { print key " = " value; done=1 }
+			h=$0; sub(/^[ \t]*\[/,"",h); sub(/\][ \t]*$/,"",h); in_t=(h==section); print; next
+		}
+		in_t && !done {
+			if (match($0,/^[ \t]*[^=]*=/)) { n=substr($0,1,RLENGTH-1); gsub(/^[ \t]+|[ \t]+$/,"",n);
+				if (n==key) { print key " = " value; done=1; next } }
+		}
+		{ print }
+		END { if (!done) { if (in_t) print key " = " value;
+			else { if (NR>0) print ""; print "[" section "]"; print key " = " value } } }
+	' "$f" > "$t" || { rm -f "$t"; return 1; }
+	cat "$t" > "$f" && rm -f "$t"
+}
+kiln_ini_get() {
+	[ -f "$1" ] || return 0
+	awk -v s="$2" -v k="$3" '
+		/^[ \t]*\[.*\][ \t]*$/ { h=$0; sub(/^[ \t]*\[/,"",h); sub(/\][ \t]*$/,"",h); t=(h==s); next }
+		t { if (match($0,/^[ \t]*[^=]*=/)) { n=substr($0,1,RLENGTH-1); gsub(/^[ \t]+|[ \t]+$/,"",n);
+			if (n==k) { v=substr($0,RLENGTH+1); sub(/[ \t]#.*$/,"",v); gsub(/^[ \t]+|[ \t]+$/,"",v); print v; exit } } }
+	' "$1"
+}
+
+# ---------------------------------------------------------------------------
+# whiptail wrappers. ALWAYS render the widget to /dev/tty and return the choice on
+# stdout. This makes them work even when the wrapper is itself inside a $(...)
+# capture (e.g. a picker that pops a msgbox): the box still draws on the terminal,
+# never into the captured stream. (whiptail prints the choice on stderr, so
+# `2>&1 1>/dev/tty` sends the widget to the tty and the choice to the caller's fd1.)
+# ---------------------------------------------------------------------------
+TITLE="Kiln config"
+msg()   { $UI --title "$TITLE" --msgbox "$1" "${2:-14}" "${3:-74}" 1>/dev/tty; }
+yesno() { $UI --title "$TITLE" --yesno "$1" "${2:-10}" "${3:-70}" 1>/dev/tty; }   # returns 0=yes
+input() { $UI --title "$TITLE" --inputbox "$1" 10 70 "$2" 3>&1 1>/dev/tty 2>&3 3>&-; }
+menu()  { mt=$1; mp=$2; shift 2; $UI --title "$TITLE" --menu "$mp" 20 78 12 "$@" 3>&1 1>/dev/tty 2>&3 3>&-; }
+
+short() { s=$1; [ -z "$s" ] && { echo "(unset)"; return; }; b=$(basename "$s" 2>/dev/null); echo "${b:-$s}"; }
+
+# edit_opt VARNAME "prompt" -- inputbox that distinguishes Cancel (keep old) from
+# clearing to empty (a valid value for e.g. system_prompt). Sets MOD on a change.
+edit_opt() {
+	eval "old=\$$1"
+	newv=$(input "$2" "$old") || return          # Cancel -> keep old
+	[ "$newv" != "$old" ] && { eval "$1=\$newv"; MOD=1; }
+}
+
+# radio_pick "prompt" "current" val1 val2 ...  -> echoes the chosen value (or current on cancel)
+radio_pick() {
+	rp=$1; cur=$2; shift 2
+	set -- $(for v in "$@"; do if [ "$v" = "$cur" ]; then printf '%s . ON ' "$v"; else printf '%s . OFF ' "$v"; fi; done)
+	sel=$($UI --title "$TITLE" --radiolist "$rp" 14 64 6 "$@" 3>&1 1>/dev/tty 2>&3 3>&-) || { echo "$cur"; return; }
+	[ -n "$sel" ] && echo "$sel" || echo "$cur"
+}
+
+# model_pick EXT current  -> scan $MODELS_DIR/*.EXT, present a menu, echo chosen path
+model_pick() {
+	ext=$1; cur=$2
+	set --
+	for f in "$MODELS_DIR"/*."$ext"; do [ -f "$f" ] && set -- "$@" "$f" "$(basename "$f")"; done
+	if [ "$#" -eq 0 ]; then
+		msg "No *.$ext models found in $MODELS_DIR.\n\nPut one there (see kiln-config -> Models, or VISION.md / kiln-chat's /model), then come back."
+		echo "$cur"; return
+	fi
+	set -- "$@" "(type a path)" "enter a path by hand"
+	[ -n "$cur" ] && set -- "$@" "(unset)" "clear this setting"
+	sel=$(menu "Pick a model" "Current: $(short "$cur")\nScanned $MODELS_DIR:" "$@") || { echo "$cur"; return; }
+	case "$sel" in
+		"(type a path)") input "Full path to the model file:" "$cur" ;;
+		"(unset)")       echo "" ;;
+		*)               echo "$sel" ;;
+	esac
+}
+
+# ---------------------------------------------------------------------------
+# 1. Status & Diagnostics
+# ---------------------------------------------------------------------------
+status_page() {
+	if command -v kiln-doctor >/dev/null 2>&1; then rep=$(kiln-doctor 2>&1); else rep=$(sh "$(dirname "$0")/kiln-doctor" 2>&1 || echo "kiln-doctor not found"); fi
+	# strip ANSI so whiptail shows it cleanly
+	rep=$(printf '%s' "$rep" | sed 's/\x1b\[[0-9;]*m//g')
+	$UI --title "Status & Diagnostics" --scrolltext --yes-button "Re-run" --no-button "Back" \
+		--yesno "$rep" 24 82 1>/dev/tty && status_page
+}
+
+# ---------------------------------------------------------------------------
+# 2. LLM Settings  ([llm])
+# ---------------------------------------------------------------------------
+llm_page() {
+	g() { kiln_ini_get "$CONF" llm "$1"; }
+	v_model=$(g model); v_temp=$(g temperature); v_topk=$(g top_k); v_topp=$(g top_p)
+	v_newtok=$(g max_new_tokens); v_ctx=$(g max_context_len); v_rep=$(g repeat_penalty)
+	v_keep=$(g keep_history); v_sys=$(g system_prompt)
+	MOD=0
+	while :; do
+		sel=$(menu "LLM Settings ([llm])" "$([ $MOD = 1 ] && echo '* unsaved changes *' || echo "editing $CONF")" \
+			model          "$(short "$v_model")" \
+			temperature    "$v_temp" \
+			top_k          "$v_topk" \
+			top_p          "$v_topp" \
+			max_new_tokens "$v_newtok" \
+			max_context_len "$v_ctx" \
+			repeat_penalty "$v_rep" \
+			keep_history   "$v_keep (1=multi-turn,0=single)" \
+			system_prompt  "$(short_sys "$v_sys")" \
+			-              "----------------------------" \
+			SAVE           "write changes to $CONF" \
+			BACK           "discard & return") || { llm_maybe_back && return; continue; }
+		case "$sel" in
+			model)          n=$(model_pick rkllm "$v_model"); [ "$n" != "$v_model" ] && { v_model=$n; MOD=1; } ;;
+			temperature)    n=$(input "Temperature 0.0-2.0 (sampling randomness; applies next kiln-chat):" "$v_temp"); setmod v_temp "$n" ;;
+			top_k)          n=$(input "top_k (1 = greedy; most coherent on the 1.5B):" "$v_topk"); setmod v_topk "$n" ;;
+			top_p)          n=$(input "top_p 0.0-1.0 (nucleus sampling):" "$v_topp"); setmod v_topp "$n" ;;
+			max_new_tokens) n=$(input "max_new_tokens (reply length cap):" "$v_newtok"); setmod v_newtok "$n" ;;
+			max_context_len) n=$(input "max_context_len (KV window; needs model reload):" "$v_ctx"); setmod v_ctx "$n" ;;
+			repeat_penalty) n=$(input "repeat_penalty (>1 discourages loops, e.g. 1.3):" "$v_rep"); setmod v_rep "$n" ;;
+			keep_history)   n=$(radio_pick "Multi-turn KV history?" "$v_keep" 1 0); setmod v_keep "$n" ;;
+			system_prompt)  edit_opt v_sys "System prompt (one line; empty = none):" ;;
+			SAVE)
+				kiln_ini_set "$CONF" llm model "$v_model"; kiln_ini_set "$CONF" llm temperature "$v_temp"
+				kiln_ini_set "$CONF" llm top_k "$v_topk"; kiln_ini_set "$CONF" llm top_p "$v_topp"
+				kiln_ini_set "$CONF" llm max_new_tokens "$v_newtok"; kiln_ini_set "$CONF" llm max_context_len "$v_ctx"
+				kiln_ini_set "$CONF" llm repeat_penalty "$v_rep"; kiln_ini_set "$CONF" llm keep_history "$v_keep"
+				kiln_ini_set "$CONF" llm system_prompt "$v_sys"
+				MOD=0; msg "Saved to $CONF.\n\nMost LLM knobs apply the next time you start kiln-chat / kiln-serve." ;;
+			BACK|"") llm_maybe_back && return ;;
+		esac
+	done
+}
+llm_maybe_back() { [ "$MOD" = 1 ] || return 0; yesno "Discard unsaved LLM changes?" && return 0; return 1; }
+short_sys() { [ -z "$1" ] && echo "(none)" || echo "$(printf '%.24s' "$1")..."; }
+setmod() { eval "cur=\$$1"; [ -n "$2" ] && [ "$2" != "$cur" ] && { eval "$1=\$2"; MOD=1; }; }
+
+# ---------------------------------------------------------------------------
+# 3. Vision Settings ([vision])  -- CLASSIFICATION ONLY
+# ---------------------------------------------------------------------------
+vision_page() {
+	g() { kiln_ini_get "$CONF" vision "$1"; }
+	v_model=$(g model); v_labels=$(g labels); v_topn=$(g top_n)
+	v_core=$(g core_mask); v_prio=$(g priority)
+	MOD=0
+	while :; do
+		sel=$(menu "Vision Settings ([vision])" "$([ $MOD = 1 ] && echo '* unsaved changes *' || echo 'classification only -- detection (YOLO) not supported')" \
+			model      "$(short "$v_model")" \
+			labels     "$(short "$v_labels")" \
+			top_n      "$v_topn" \
+			core_mask  "$v_core" \
+			priority   "$v_prio" \
+			-          "----------------------------" \
+			SAVE       "write changes to $CONF" \
+			BACK       "discard & return") || { vis_maybe_back && return; continue; }
+		case "$sel" in
+			model)
+				msg "Vision is CLASSIFICATION ONLY today (top-N ImageNet-style labels). Detection / YOLO is on the roadmap -- pick a classification .rknn (e.g. MobileNet)."
+				n=$(model_pick rknn "$v_model"); [ "$n" != "$v_model" ] && { v_model=$n; MOD=1; } ;;
+			labels)    edit_opt v_labels "Labels file (one class per line):" ;;
+			top_n)     n=$(input "How many top classes to print:" "$v_topn"); setmod v_topn "$n" ;;
+			core_mask) n=$(radio_pick "NPU core mask (RK3576 has 2 cores):" "$v_core" auto 0 1 0_1); setmod v_core "$n" ;;
+			priority)  n=$(radio_pick "NPU scheduling priority:" "$v_prio" high medium low); setmod v_prio "$n" ;;
+			SAVE)
+				kiln_ini_set "$CONF" vision model "$v_model"; kiln_ini_set "$CONF" vision labels "$v_labels"
+				kiln_ini_set "$CONF" vision top_n "$v_topn"; kiln_ini_set "$CONF" vision core_mask "$v_core"
+				kiln_ini_set "$CONF" vision priority "$v_prio"
+				MOD=0; msg "Saved to $CONF.\n\nApplies the next time you run kiln-vision / kiln-serve." ;;
+			BACK|"") vis_maybe_back && return ;;
+		esac
+	done
+}
+vis_maybe_back() { [ "$MOD" = 1 ] || return 0; yesno "Discard unsaved vision changes?" && return 0; return 1; }
+
+# ---------------------------------------------------------------------------
+# Batch-2 stubs (Models / Server / Advanced) -- clearly marked, non-destructive.
+# ---------------------------------------------------------------------------
+stub() { msg "$1\n\nThis page is not built yet (batch 2). For now, edit $CONF by hand or use:\n  $2"; }
+
+# ---------------------------------------------------------------------------
+# Main menu
+# ---------------------------------------------------------------------------
+[ -f "$CONF" ] || msg "No $CONF yet -- run the installer, or I'll create it on first save. Built-in defaults apply until then."
+while :; do
+	sel=$(menu "Kiln — LLM + vision on the RK3576 NPU" "config: $CONF" \
+		1 "Status & Diagnostics  (kiln-doctor)" \
+		2 "LLM Settings          ([llm])" \
+		3 "Vision Settings       ([vision])" \
+		4 "Server                (batch 2)" \
+		5 "Models                (batch 2)" \
+		6 "Advanced              (batch 2)" \
+		- "----------------------------" \
+		Q "Quit") || break
+	case "$sel" in
+		1) status_page ;;
+		2) llm_page ;;
+		3) vision_page ;;
+		4) stub "Server: [server] host/port + systemd control of kiln-serve." "sudo systemctl enable --now kiln-serve  /  edit [server] in $CONF" ;;
+		5) stub "Models: list, download defaults (KILN_MODELS_URL), add-from-path, version-check, remove." "kiln-doctor  /  put files in $MODELS_DIR" ;;
+		6) stub "Advanced: reload rknpu, rebuild DKMS, check kernel update, re-run install, restore wifi." "sudo bash /opt/kiln/scripts/kiln-install.sh" ;;
+		Q|"") break ;;
+	esac
+done
+clear 2>/dev/null || true

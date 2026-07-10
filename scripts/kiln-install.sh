@@ -322,13 +322,13 @@ fi
 # apt-get install would needlessly try the network -- and `|| die` would then abort
 # the whole offline install. Skip it when the prerequisites are already present.
 need_apt=0
-for c in git gcc dkms dtc curl mkimage; do command -v "$c" >/dev/null 2>&1 || need_apt=1; done
+for c in git gcc dkms dtc curl mkimage whiptail; do command -v "$c" >/dev/null 2>&1 || need_apt=1; done
 for p in libreadline-dev libgomp1 ca-certificates; do dpkg -s "$p" >/dev/null 2>&1 || need_apt=1; done
 if [ "$need_apt" = 1 ]; then
 	say "installing prerequisites ..."
 	$SUDO apt-get update -qq || true
 	$SUDO apt-get install -y git build-essential dkms device-tree-compiler curl ca-certificates u-boot-tools \
-		libreadline-dev libgomp1 \
+		libreadline-dev libgomp1 whiptail \
 		|| die "apt failed installing prerequisites (need network for the first run)."
 else
 	say "prerequisites already present — skipping apt."
