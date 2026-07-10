@@ -121,16 +121,20 @@ elif [ -n "$LLM" ]; then
 else
 	info "no LLM model yet (vision-only) -- drop a *-rk3576-w4a16.rkllm in $MODELS_DIR and kiln-chat finds it"
 fi
-if [ -z "$VIS" ]; then
-	warn "[vision] model is empty"
-elif [ -f "$VIS" ]; then ok "vision model present: $VIS"
-else bad "vision model MISSING: $VIS -- convert a MobileNet .rknn (see VISION.md) or fix it in kiln-config"; fi
+# vision model is auto-discovered too (a .rknn can be a classifier OR a detector, so
+# with several present, pin the right one per task in kiln-config).
+VIS_AUTO="$(ls "$MODELS_DIR"/*.rknn 2>/dev/null | sort | head -1)"
+if [ -n "$VIS" ] && [ -f "$VIS" ]; then VISR="$VIS"; ok "vision model: $VIS"
+elif [ -n "$VIS_AUTO" ]; then VISR="$VIS_AUTO"; ok "vision model: $VIS_AUTO (auto-discovered)"
+elif [ -n "$VIS" ]; then VISR=""; bad "vision model MISSING: $VIS and no *.rknn in $MODELS_DIR -- convert one (VISION.md) or fix it in kiln-config"
+else VISR=""; info "no vision model yet -- put a *.rknn in $MODELS_DIR (classify: MobileNet; detect: a YOLO)"; fi
+[ "$VTASK" = detect ] && [ -n "$VISR" ] && info "task=detect: ensure that .rknn is a YOLO detector, not a classifier"
 if [ -n "$LAB" ] && [ ! -f "$LAB" ]; then warn "vision labels file missing: $LAB"; fi
 # Version guard: a .rknn embeds the rknn-toolkit2 version it was converted with;
 # compare it to the librknnrt runtime (2.3.x). A mismatch (e.g. a 2.1.0-converted
 # model on the 2.3.0 runtime) throws std::out_of_range in rknn_inputs_set.
-if [ -n "$VIS" ] && [ -f "$VIS" ]; then
-	rv="$(strings "$VIS" 2>/dev/null | grep -oE '"version":"[0-9]+\.[0-9]+\.[0-9]+"' | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
+if [ -n "$VISR" ] && [ -f "$VISR" ]; then
+	rv="$(strings "$VISR" 2>/dev/null | grep -oE '"version":"[0-9]+\.[0-9]+\.[0-9]+"' | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
 	case "$rv" in
 		"")    info "couldn't read the .rknn converter version (older format?) -- ensure it was built on rknn-toolkit2 2.3.x";;
 		2.3.*) ok "vision model converter rknn-toolkit2 $rv matches librknnrt 2.3.x";;

@@ -44,8 +44,10 @@ struct KilnConfig {
     // (model-neutral; set one live with /system, or here).
     std::string llm_system_prompt    = "";
 
-    // [vision] -- librknnrt
-    std::string vision_model   = "/opt/models/mobilenetv2-12_rk3576.rknn";
+    // [vision] -- librknnrt. Empty by default: auto-discover a *.rknn in /opt/models
+    // (like the LLM). NB a .rknn can be a classifier OR a detector, so with several
+    // present, PIN the right one per task (kiln-config -> Vision -> model).
+    std::string vision_model   = "";
     std::string vision_labels  = "/opt/models/imagenet_labels.txt";
     int         vision_top_n   = 5;
     std::string vision_core_mask = "auto";  // auto | 0 | 1 | 0_1   (RK3576 has 2 NPU cores)

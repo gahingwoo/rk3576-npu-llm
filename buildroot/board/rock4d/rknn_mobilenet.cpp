@@ -77,6 +77,9 @@ int main(int argc, char **argv) {
         image = argc > 1 ? argv[1] : "/opt/models/test.jpg";
     }
 
+    // auto-discover the .rknn if none is configured / it's missing (Kiln ships none).
+    cfg.vision_model = kiln::resolve_model(cfg.vision_model, ".rknn");
+
     // dispatch on the vision task; detect is the EXPERIMENTAL YOLO path. An extra
     // image-path arg (kiln-vision img.jpg out.jpg) saves the annotated result.
     if (cfg.vision_task == "detect") {

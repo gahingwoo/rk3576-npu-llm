@@ -52,13 +52,13 @@ into the `.rkllm` at conversion — not settable.
 
 | key | meaning |
 |---|---|
-| `model` | path to the `.rknn` |
+| `model` | path to the `.rknn` — **empty by default** = auto-discover any `*.rknn` in `/opt/models` (a `.rknn` can be a classifier OR a detector, so pin the right one per task when several are present) |
 | `labels` | class-labels text file (one per line) |
 | `top_n` | how many classes to print/return |
 | `core_mask` | NPU cores: `auto` \| `0` \| `1` \| `0_1` (RK3576 has 2 cores) |
 | `priority` | RKNN scheduling priority: `high` \| `medium` \| `low` |
 | `task` | `classify` (default) or `detect` — **detect is EXPERIMENTAL** (YOLO, unverified on hardware); see [`../VISION.md`](../VISION.md) |
-| `detector` | detect family: `auto` \| `yolov8` \| `yolov5` \| `yolox` (used only when `task=detect`) |
+| `detector` | detect family: `auto` \| `yolov8` \| `yolov5` \| `yolox` \| `end2end` (YOLO26/v10 NMS-in-model); used only when `task=detect` |
 | `conf_threshold`, `nms_iou` | detection score / NMS-IoU thresholds (used only when `task=detect`) |
 
 **Not settable (baked into the `.rknn`):** input size/layout and the mean/std

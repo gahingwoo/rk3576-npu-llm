@@ -128,7 +128,7 @@ int main(int argc, char **argv) {
     std::unique_ptr<KilnVision> vision;
     std::unique_ptr<KilnDetect> detector;   // EXPERIMENTAL: [vision] task = detect
     {
-        KilnConfig vc = cfg; vc.vision_model = cfg.server_vision();
+        KilnConfig vc = cfg; vc.vision_model = kiln::resolve_model(cfg.server_vision(), ".rknn");
         FILE *vf = fopen(vc.vision_model.c_str(), "rb");
         if (vf) {
             fclose(vf);

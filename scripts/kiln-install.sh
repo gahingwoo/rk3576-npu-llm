@@ -601,7 +601,7 @@ keep_history = 1
 system_prompt =
 
 [vision]
-model = /opt/models/$MODEL_RKNN
+model =
 labels = /opt/models/imagenet_labels.txt
 top_n = 5
 core_mask = auto

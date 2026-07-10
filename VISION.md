@@ -87,10 +87,17 @@ image + labels. A `mobilenetv2-12_rk3576.rknn` in `model/` is baked to `/opt/mod
 The vision path is **classification only** by default. A separate, experimental
 detection path lives in `buildroot/board/rock4d/kiln_detect.h`, kept apart from the
 classifier so the working classify path is untouched. It is enabled by
-`[vision] task = detect` and supports three YOLO families: **YOLOv8 / YOLO11**
-(anchor-free, DFL), **YOLOv5 / YOLOv7** (anchor-based), and **YOLOX** (anchor-free +
-objectness). `detector = auto` picks the family from the model's output shapes; you
-can force it (`yolov8` / `yolov5` / `yolox`).
+`[vision] task = detect` and supports four YOLO families: **YOLOv8 / YOLO11**
+(anchor-free, DFL), **YOLOv5 / YOLOv7** (anchor-based), **YOLOX** (anchor-free +
+objectness), and **end2end / NMS-in-model** exports (Ultralytics **YOLO26**,
+**YOLOv10**) whose single `[1, N, 6]` output is already decoded + NMS'd inside the
+model. `detector = auto` picks the family from the model's output shapes; you can
+force it (`yolov8` / `yolov5` / `yolox` / `end2end`).
+
+> An end2end export (e.g. `yolo model=... format=onnx nms=True`) is the easiest to
+> convert: `rknn-toolkit2` 2.3.2 turns the whole graph (NMS included) into a `.rknn`
+> whose output is the final boxes — Kiln just thresholds + un-letterboxes them. Note
+> the in-model NMS ops (TopK/GatherElements) may run partly on CPU; verify on-board.
 
 What's **verified on the host** (unit tests, no NPU): the letterbox preprocessing +
 its inverse box mapping, IoU, per-class NMS, box drawing, AND all three per-branch

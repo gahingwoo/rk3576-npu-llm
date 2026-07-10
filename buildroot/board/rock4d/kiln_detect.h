@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // kiln_detect.h -- EXPERIMENTAL object-detection foundation for the RK3576 NPU via
-// librknnrt (RKNN). YOLOv8/YOLO11 (anchor-free DFL), YOLOv5/v7 (anchor-based), and
-// YOLOX (anchor-free + objectness).
+// librknnrt (RKNN). YOLOv8/YOLO11 (anchor-free DFL), YOLOv5/v7 (anchor-based), YOLOX
+// (anchor-free + objectness), and END2END / NMS-in-model exports (Ultralytics
+// YOLO26, YOLOv10) whose single [1,N,6] output is already decoded + NMS'd.
 //
 //   *** EXPERIMENTAL -- the decoders are UNIT-TESTED on the host with synthetic
 //       tensors, but NOT yet verified end-to-end against a real model on a board. ***
@@ -47,7 +48,7 @@
 struct KilnBox { float x1, y1, x2, y2; };                    // pixels in the ORIGINAL image
 struct KilnDetection { KilnBox box; int class_id; std::string label; float score; };
 struct KilnLetterbox { float scale; int pad_x, pad_y; int in_w, in_h; };
-enum KilnDetector { KILN_DET_AUTO = 0, KILN_DET_YOLOV8, KILN_DET_YOLOV5, KILN_DET_YOLOX };
+enum KilnDetector { KILN_DET_AUTO = 0, KILN_DET_YOLOV8, KILN_DET_YOLOV5, KILN_DET_YOLOX, KILN_DET_END2END };
 
 class KilnDetect {
 public:
@@ -157,6 +158,20 @@ public:
         }
     }
 
+    // End2end / NMS-free YOLO (Ultralytics YOLO26, YOLOv10, ...). ONE output tensor
+    // [1, N, 6]: N rows of [x1, y1, x2, y2, score, class_id] in MODEL coords, already
+    // NMS'd inside the model. So: threshold + un-letterbox only, no CPU decode/NMS.
+    static void decode_end2end_branch(const float *data, int num_rows, float conf,
+                                      const std::vector<std::string> &labels, std::vector<KilnDetection> &out) {
+        for (int i = 0; i < num_rows; i++) {
+            const float *r = data + i * 6;
+            float score = r[4];
+            if (score < conf) continue;
+            int cls = (int)(r[5] + 0.5f);
+            out.push_back({{r[0], r[1], r[2], r[3]}, cls, label_of(labels, cls), score});
+        }
+    }
+
     // Draw box outlines (per-class colour) into an RGB buffer (w*h*3). Labels are in
     // the printed/JSON output; text overlay would need a bundled font, so boxes only.
     static void draw_boxes(unsigned char *rgb, int w, int h, const std::vector<KilnDetection> &dets, int thick = 3) {
@@ -196,7 +211,9 @@ public:
         nchw_ = (in_.fmt == RKNN_TENSOR_NCHW);
         if (c_ != 3) { snprintf(err_, sizeof(err_), "input channels %d (need 3)", c_); return -1; }
 
-        if (io_.n_output < 2) { snprintf(err_, sizeof(err_), "model has %u outputs; not a YOLO detector", io_.n_output); return -1; }
+        // Detectors have 1 output ([1,N,6] end2end/NMS-in-model) or several (grid heads).
+        // A classifier (1 output, not [.,.,6]) simply decodes to nothing, no crash.
+        if (io_.n_output < 1) { snprintf(err_, sizeof(err_), "model has no outputs"); return -1; }
         out_attrs_.resize(io_.n_output);
         for (uint32_t i = 0; i < io_.n_output; i++) {
             memset(&out_attrs_[i], 0, sizeof(rknn_tensor_attr));
@@ -246,7 +263,7 @@ public:
         rknn_outputs_release(ctx_, io_.n_output, outs.data());
 
         for (auto &d : out) d.box = unletterbox(d.box, lb);
-        nms(out, nms_iou);
+        if (family() != KILN_DET_END2END) nms(out, nms_iou);   // end2end already NMS'd
         return out;
     }
     std::vector<KilnDetection> detect_encoded(const unsigned char *data, int len,
@@ -274,14 +291,15 @@ public:
     ~KilnDetect() { if (ctx_) rknn_destroy(ctx_); }
 
     static KilnDetector parse_family(const std::string &s) {
-        if (s == "yolov8" || s == "yolo11" || s == "yolov11") return KILN_DET_YOLOV8;
-        if (s == "yolov5" || s == "yolov7")                   return KILN_DET_YOLOV5;
-        if (s == "yolox")                                     return KILN_DET_YOLOX;
+        if (s == "yolov8" || s == "yolo11" || s == "yolov11")   return KILN_DET_YOLOV8;
+        if (s == "yolov5" || s == "yolov7")                     return KILN_DET_YOLOV5;
+        if (s == "yolox")                                       return KILN_DET_YOLOX;
+        if (s == "end2end" || s == "yolov10" || s == "yolo26")  return KILN_DET_END2END;
         return KILN_DET_AUTO;
     }
     static const char *det_name(KilnDetector f) {
         switch (f) { case KILN_DET_YOLOV8: return "yolov8/11"; case KILN_DET_YOLOV5: return "yolov5/7";
-                     case KILN_DET_YOLOX: return "yolox"; default: return "auto"; }
+                     case KILN_DET_YOLOX: return "yolox"; case KILN_DET_END2END: return "end2end"; default: return "auto"; }
     }
 
 private:
@@ -303,6 +321,10 @@ private:
 
     // Pick a family from the output shapes when task=detect but detector=auto.
     KilnDetector auto_family() const {
+        if (io_.n_output == 1) {                                            // one output
+            const rknn_tensor_attr &a = out_attrs_[0];
+            if (a.n_dims >= 2 && a.dims[a.n_dims - 1] == 6) return KILN_DET_END2END;  // [1,N,6] NMS-in-model
+        }
         if (io_.n_output == 6 || io_.n_output == 9) return KILN_DET_YOLOV8;
         if (io_.n_output == 3) {
             int gh, gw, ch; dims_nchw(out_attrs_[0], gh, gw, ch);
@@ -314,6 +336,13 @@ private:
 
     void decode(const std::vector<rknn_output> &outs, float conf, std::vector<KilnDetection> &out) {
         KilnDetector fam = family_ == KILN_DET_AUTO ? auto_family() : family_;
+        if (fam == KILN_DET_END2END) {
+            const rknn_tensor_attr &a = out_attrs_[0];
+            int rows = a.n_dims >= 2 ? (int)a.dims[a.n_dims - 2] : 0;       // [1,N,6] -> N
+            int cols = a.n_dims >= 1 ? (int)a.dims[a.n_dims - 1] : 0;       // -> 6
+            if (cols == 6 && rows > 0) decode_end2end_branch((const float *)outs[0].buf, rows, conf, labels_, out);
+            return;
+        }
         if (fam == KILN_DET_YOLOV8) {
             int opb = (int)io_.n_output / 3; if (opb < 2) return;
             for (int s = 0; s < 3; s++) {
