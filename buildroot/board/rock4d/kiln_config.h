@@ -84,7 +84,20 @@ inline bool load(KilnConfig &c, const std::string &path = config_path()) {
         size_t eq = t.find('=');
         if (eq == std::string::npos) continue;
         std::string k = trim(t.substr(0, eq));
-        std::string v = trim(t.substr(eq + 1));
+        std::string v = t.substr(eq + 1);
+        // Strip a trailing INLINE comment (whitespace then '#'). save() writes such
+        // comments on the enum fields ("core_mask = auto   # auto | 0 | 1 | 0_1"),
+        // so without this a persisted non-default value like "core_mask = 0   # ..."
+        // would be read as the literal "0   # ..." and never match. This matches the
+        // shell tools' reader (kiln-doctor / kiln-config). NB: a '#' that follows a
+        // space inside a value (an unusual system_prompt) is treated as a comment --
+        // avoid " #" in a system prompt.
+        {
+            size_t hs = v.find(" #"), ht = v.find("\t#");
+            if (ht != std::string::npos && (hs == std::string::npos || ht < hs)) hs = ht;
+            if (hs != std::string::npos) v = v.substr(0, hs);
+        }
+        v = trim(v);
         std::string key = section + "." + k;
         // LLM
         if      (key == "llm.model")             c.llm_model = v;
