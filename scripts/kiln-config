@@ -210,9 +210,143 @@ vision_page() {
 vis_maybe_back() { [ "$MOD" = 1 ] || return 0; yesno "Discard unsaved vision changes?" && return 0; return 1; }
 
 # ---------------------------------------------------------------------------
-# Batch-2 stubs (Models / Server / Advanced) -- clearly marked, non-destructive.
+# 4. Server ([server] + systemd control of kiln-serve)
 # ---------------------------------------------------------------------------
-stub() { msg "$1\n\nThis page is not built yet (batch 2). For now, edit $CONF by hand or use:\n  $2"; }
+server_page() {
+	g() { kiln_ini_get "$CONF" server "$1"; }
+	v_host=$(g host); v_port=$(g port); MOD=0
+	[ -n "$v_host" ] || v_host=0.0.0.0
+	[ -n "$v_port" ] || v_port=8080
+	while :; do
+		st=$(systemctl is-active kiln-serve 2>/dev/null || echo "not-installed")
+		en=$(systemctl is-enabled kiln-serve 2>/dev/null || echo "-")
+		sel=$(menu "Server ([server])" "kiln-serve: $st / $en $([ "$MOD" = 1 ] && echo '     * unsaved changes *')" \
+			host    "$v_host" \
+			port    "$v_port" \
+			service "start / stop / enable kiln-serve ->" \
+			-       "----------------------------" \
+			SAVE    "write host/port to $CONF" \
+			BACK    "discard & return") || { srv_maybe_back && return; continue; }
+		case "$sel" in
+			host)    edit_opt v_host "Listen host (0.0.0.0 = all interfaces):" ;;
+			port)    n=$(input "Port (e.g. 8080):" "$v_port"); setmod v_port "$n" ;;
+			service) service_menu ;;
+			SAVE)    kiln_ini_set "$CONF" server host "$v_host"; kiln_ini_set "$CONF" server port "$v_port"
+			         MOD=0; msg "Saved to $CONF.\n\nRestart kiln-serve to apply: Server -> service -> restart." ;;
+			BACK|"") srv_maybe_back && return ;;
+		esac
+	done
+}
+srv_maybe_back() { [ "$MOD" = 1 ] || return 0; yesno "Discard unsaved server changes?" && return 0; return 1; }
+service_menu() {
+	command -v systemctl >/dev/null 2>&1 || { msg "no systemd here."; return; }
+	sel=$(menu "kiln-serve service" "OpenAI-compatible API server (needs an LLM model)" \
+		start   "start now" \
+		stop    "stop" \
+		restart "restart (apply config changes)" \
+		enable  "enable + start at boot" \
+		disable "disable at boot" \
+		status  "show status") || return
+	case "$sel" in
+		start|stop|restart|disable) out=$(systemctl "$sel" kiln-serve 2>&1); msg "systemctl $sel kiln-serve:\n\n${out:-done}" ;;
+		enable)  out=$(systemctl enable --now kiln-serve 2>&1); msg "systemctl enable --now kiln-serve:\n\n${out:-done}" ;;
+		status)  out=$(systemctl status kiln-serve --no-pager 2>&1 | head -n 18); msg "$out" 22 90 ;;
+	esac
+}
+
+# ---------------------------------------------------------------------------
+# 5. Models -- YOU supply models (like the vendor stack). List / set / add / remove.
+# ---------------------------------------------------------------------------
+models_page() {
+	while :; do
+		llm=$(kiln_ini_get "$CONF" llm model); vis=$(kiln_ini_get "$CONF" vision model)
+		sel=$(menu "Models ($MODELS_DIR)" "LLM: $(short "$llm")    Vision: $(short "$vis")" \
+			setllm "set the active LLM model   ([llm] model)" \
+			setvis "set the active vision model ([vision] model)" \
+			list   "list + inspect installed models (sizes, versions)" \
+			add    "add a model from a path (copy into $MODELS_DIR)" \
+			remove "remove a model file" \
+			guide  "how to get / convert models" \
+			-      "----------------------------" \
+			BACK   "back") || return
+		case "$sel" in
+			setllm) n=$(model_pick rkllm "$llm"); [ "$n" != "$llm" ] && { kiln_ini_set "$CONF" llm model "$n"; msg "[llm] model = ${n:-(unset)}"; } ;;
+			setvis) msg "Vision is CLASSIFICATION-ONLY (top-N labels). Detection / YOLO is not supported -- pick a classification .rknn (e.g. MobileNet)."
+			        n=$(model_pick rknn "$vis"); [ "$n" != "$vis" ] && { kiln_ini_set "$CONF" vision model "$n"; msg "[vision] model = ${n:-(unset)}"; } ;;
+			list)   models_list ;;
+			add)    models_add ;;
+			remove) models_remove ;;
+			guide)  msg "Kiln doesn't ship models -- you supply them, same as the vendor stack.\n\nLLM: put a *-rk3576-w4a16.rkllm in $MODELS_DIR (must match librkllmrt 1.2.0). kiln-chat auto-finds any .rkllm there.\n\nVision: convert a MobileNet .rknn with rknn-toolkit2 2.3.2 -- ON THE BOARD (aarch64) or an x86 host, see VISION.md -- and put it in $MODELS_DIR. Classification only." 18 84 ;;
+			BACK|"") return ;;
+		esac
+	done
+}
+models_list() {
+	t="Installed in $MODELS_DIR:\n\n"; found=0
+	for f in "$MODELS_DIR"/*.rkllm "$MODELS_DIR"/*.rknn; do
+		[ -f "$f" ] || continue; found=1
+		sz=$(du -h "$f" 2>/dev/null | cut -f1)
+		ex=""
+		case "$f" in *.rknn) rv=$(strings "$f" 2>/dev/null | grep -oE '"version":"[0-9.]+"' | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+'); [ -n "$rv" ] && ex="  toolkit $rv" ;; esac
+		t="$t  $(basename "$f")   [$sz]$ex\n"
+	done
+	[ "$found" = 0 ] && t="${t}  (none -- put *.rkllm / *.rknn here)"
+	t="$t\n\nRuntimes: librkllmrt 1.2.0, librknnrt 2.3.x -- models must match."
+	msg "$t" 20 84
+}
+models_add() {
+	p=$(input "Full path to a .rkllm / .rknn to copy into $MODELS_DIR:" "") || return
+	[ -n "$p" ] || return
+	[ -f "$p" ] || { msg "Not a file: $p"; return; }
+	case "$p" in *.rkllm|*.rknn) : ;; *) yesno "That isn't a .rkllm/.rknn. Copy anyway?" || return ;; esac
+	mkdir -p "$MODELS_DIR"
+	if cp "$p" "$MODELS_DIR/"; then msg "Copied $(basename "$p") -> $MODELS_DIR"; else msg "Copy failed (permissions?)."; fi
+}
+models_remove() {
+	set --
+	for f in "$MODELS_DIR"/*.rkllm "$MODELS_DIR"/*.rknn; do [ -f "$f" ] && set -- "$@" "$(basename "$f")" ""; done
+	[ "$#" -eq 0 ] && { msg "No models in $MODELS_DIR."; return; }
+	sel=$(menu "Remove a model" "delete a file from $MODELS_DIR (cannot be undone)" "$@") || return
+	[ -n "$sel" ] || return
+	yesno "Delete $MODELS_DIR/$sel ?\n\nThis cannot be undone." && { rm -f "$MODELS_DIR/$sel" && msg "Deleted $sel." || msg "Delete failed (permissions?)."; }
+}
+
+# ---------------------------------------------------------------------------
+# 6. Advanced -- system actions, each behind a yes/no confirm.
+# ---------------------------------------------------------------------------
+INSTALLER="${KILN_DIR:-/opt/kiln}/scripts/kiln-install.sh"
+advanced_page() {
+	while :; do
+		sel=$(menu "Advanced" "system actions -- each asks to confirm; some need a reboot" \
+			reload "reload the rknpu driver (rmmod + modprobe)" \
+			driver "rebuild the rknpu DKMS module + restore wifi" \
+			update "re-run the installer (checks for a kernel update, rebuilds all)" \
+			-      "----------------------------" \
+			BACK   "back") || return
+		case "$sel" in
+			reload)
+				yesno "Reload rknpu now?\n\nStop kiln-serve first if it's running (it holds the render node)." || continue
+				out=$( { systemctl stop kiln-serve 2>/dev/null; rmmod rknpu && modprobe rknpu; } 2>&1 )
+				msg "rknpu reload:\n\n${out:-done (rmmod + modprobe ok)}" ;;
+			driver)
+				[ -f "$INSTALLER" ] || { msg "installer not found at $INSTALLER"; continue; }
+				yesno "Rebuild the rknpu DKMS module and restore wifi now?\n\n(Runs the driver stage; may take a few minutes.)" \
+					&& run_installer "KILN_SKIP_KERNEL=1 KILN_SKIP_RUNTIMES=1" ;;
+			update)
+				[ -f "$INSTALLER" ] || { msg "installer not found at $INSTALLER"; continue; }
+				yesno "Re-run the full installer now?\n\nIt checks for a newer Kiln kernel and rebuilds the driver + runtimes. May reboot." \
+					&& run_installer "" ;;
+			BACK|"") return ;;
+		esac
+	done
+}
+# run the installer outside whiptail (its output is long); pause on return.
+run_installer() {
+	clear 2>/dev/null || true
+	echo "=== running: $1 bash $INSTALLER ==="; echo
+	env $1 bash "$INSTALLER"; rc=$?
+	echo; echo "=== installer exited $rc -- press Enter to return to kiln-config ==="; read -r _
+}
 
 # ---------------------------------------------------------------------------
 # Main menu
@@ -223,18 +357,18 @@ while :; do
 		1 "Status & Diagnostics  (kiln-doctor)" \
 		2 "LLM Settings          ([llm])" \
 		3 "Vision Settings       ([vision])" \
-		4 "Server                (batch 2)" \
-		5 "Models                (batch 2)" \
-		6 "Advanced              (batch 2)" \
+		4 "Server                ([server] + kiln-serve)" \
+		5 "Models                (list / set / add / remove)" \
+		6 "Advanced              (driver / kernel / wifi)" \
 		- "----------------------------" \
 		Q "Quit") || break
 	case "$sel" in
 		1) status_page ;;
 		2) llm_page ;;
 		3) vision_page ;;
-		4) stub "Server: [server] host/port + systemd control of kiln-serve." "sudo systemctl enable --now kiln-serve  /  edit [server] in $CONF" ;;
-		5) stub "Models: list, download defaults (KILN_MODELS_URL), add-from-path, version-check, remove." "kiln-doctor  /  put files in $MODELS_DIR" ;;
-		6) stub "Advanced: reload rknpu, rebuild DKMS, check kernel update, re-run install, restore wifi." "sudo bash /opt/kiln/scripts/kiln-install.sh" ;;
+		4) server_page ;;
+		5) models_page ;;
+		6) advanced_page ;;
 		Q|"") break ;;
 	esac
 done
