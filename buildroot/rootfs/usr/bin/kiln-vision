@@ -29,8 +29,10 @@ case "${1:-}" in
 	VIS_MODEL=$(awk '/^[ \t]*\[/{s=$0} s ~ /^[ \t]*\[vision\]/ && /^[ \t]*model[ \t]*=/{sub(/^[^=]*=/,"");sub(/[ \t]#.*/,"");gsub(/^[ \t]+|[ \t]+$/,"");print;exit}' "$CONF" 2>/dev/null)
 	if [ -z "$VIS_MODEL" ] || [ ! -f "$VIS_MODEL" ]; then
 		echo "kiln-vision: no vision model found (config [vision] model = '${VIS_MODEL:-unset}')."
-		echo "  Convert a MobileNet .rknn -- it runs on the board now, see VISION.md -- put it in /opt/models,"
-		echo "  then pick it with:  sudo kiln-config  ->  Vision Settings  ->  model"
+		echo "  Build one on the board -- no x86 host, no scp:"
+		echo "      sudo kiln-convert mobilenet --set-active    # image classifier"
+		echo "      sudo kiln-convert yolov8n  --set-active    # object detector (YOLO)"
+		echo "  or drop your own .rknn in /opt/models and pick it in: sudo kiln-config -> Vision"
 		exit 1
 	fi
 	;;
