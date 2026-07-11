@@ -80,8 +80,23 @@ input() { $UI --backtitle "$BT" --title "$TITLE" --inputbox "$1" 10 70 "$2" 3>&1
 # mis-parses an item starting with '-' (e.g. -1, or an odd filename) as an option --
 # that error would otherwise be swallowed by the caller's `|| break` (TUI "won't open").
 menu()  { mt=$1; mp=$2; shift 2; $UI --backtitle "$BT" --title "$mt" --menu "$mp" 20 78 12 -- "$@" 3>&1 1>/dev/tty 2>&3 3>&-; }
+# menu_nt: same, but --notags HIDES the tag column so only the description shows (still
+# RETURNS the tag). Use it for navigation/action menus where the tag would just repeat
+# the label (main menu, Models, System); keep menu() where the tag is real content (a
+# field name next to its value, or a filename next to its size).
+menu_nt(){ mt=$1; mp=$2; shift 2; $UI --backtitle "$BT" --title "$mt" --notags --menu "$mp" 20 78 12 -- "$@" 3>&1 1>/dev/tty 2>&3 3>&-; }
 
 short() { s=$1; [ -z "$s" ] && { echo "(unset)"; return; }; b=$(basename "$s" 2>/dev/null); echo "${b:-$s}"; }
+# Like short(), but trims the noisy conversion suffix (.rkllm/.rknn, -rk3576-w4a16, ...)
+# and caps the length -- for the compact status line, where a full 40-char filename
+# would blow past the dialog width and truncate the fields after it.
+shortmodel() {
+	b=$(basename "${1:-}" 2>/dev/null)
+	[ -z "$b" ] && { echo "(none)"; return; }
+	b=${b%.rkllm}; b=${b%.rknn}; b=${b%_fp}; b=${b%_i8}; b=${b%-rk3576-w4a16}; b=${b%_rk3576}; b=${b%-rk3576}
+	[ "${#b}" -gt 22 ] && b="$(printf '%.20s' "$b")…"
+	echo "$b"
+}
 
 # One-line live status for the main-menu subtitle (armbian-config style): NPU driver
 # state + the LLM / vision model that will actually load + the vision task. Recomputed
@@ -91,7 +106,7 @@ status_summary() {
 	sllm=$(kiln_ini_get "$CONF" llm model); [ -n "$sllm" ] || sllm=$(ls "$MODELS_DIR"/*.rkllm 2>/dev/null | head -1)
 	svis=$(kiln_ini_get "$CONF" vision model); [ -n "$svis" ] || svis=$(ls "$MODELS_DIR"/*.rknn 2>/dev/null | head -1)
 	svt=$(kiln_ini_get "$CONF" vision task); [ -n "$svt" ] || svt=classify
-	printf 'NPU: %s   LLM: %s   Vision: %s (%s)' "$snpu" "$(short "$sllm")" "$(short "$svis")" "$svt"
+	printf 'NPU %s      LLM: %s      Vision: %s (%s)' "$snpu" "$(shortmodel "$sllm")" "$(shortmodel "$svis")" "$svt"
 }
 
 # edit_opt VARNAME "prompt" -- inputbox that distinguishes Cancel (keep old) from
@@ -289,7 +304,7 @@ server_page() {
 srv_maybe_back() { [ "$MOD" = 1 ] || return 0; yesno "Discard unsaved server changes?" && return 0; return 1; }
 service_menu() {
 	command -v systemctl >/dev/null 2>&1 || { msg "no systemd here."; return; }
-	sel=$(menu "kiln-serve service" "OpenAI-compatible API server (needs an LLM model)" \
+	sel=$(menu_nt "kiln-serve service" "OpenAI-compatible API server (needs an LLM model)" \
 		start   "start now" \
 		stop    "stop" \
 		restart "restart (apply config changes)" \
@@ -309,7 +324,7 @@ service_menu() {
 models_page() {
 	while :; do
 		llm=$(kiln_ini_get "$CONF" llm model); vis=$(kiln_ini_get "$CONF" vision model)
-		sel=$(menu "Models ($MODELS_DIR)" "LLM: $(short "$llm")    Vision: $(short "$vis")" \
+		sel=$(menu_nt "Models ($MODELS_DIR)" "LLM: $(short "$llm")    Vision: $(short "$vis")" \
 			get    "get / convert a model on the board  (kiln-convert) ->" \
 			setllm "set the active LLM model   ([llm] model)" \
 			setvis "set the active vision model ([vision] model)" \
@@ -338,7 +353,7 @@ models_get() {
 	KC="$(command -v kiln-convert 2>/dev/null || echo "$(dirname "$0")/kiln-convert")"
 	[ -x "$KC" ] || [ -f "$KC" ] || { msg "kiln-convert not found (expected on PATH or next to kiln-config)."; return; }
 	while :; do
-		sel=$(menu "Get / convert a model" "Build a .rknn ON THIS BOARD. The FIRST convert installs rknn-toolkit2 (a few hundred MB, a few minutes); after that it's quick." \
+		sel=$(menu_nt "Get / convert a model" "Build a .rknn ON THIS BOARD. The FIRST convert installs rknn-toolkit2 (a few hundred MB, a few minutes); after that it's quick." \
 			mobilenet "MobileNet classifier — pull ONNX (Apache-2.0) + convert" \
 			yolov8    "YOLOv8n detector   — pull ONNX (Ultralytics AGPL) + convert" \
 			local     "convert a local .onnx  (or place a local .rknn)" \
@@ -395,7 +410,7 @@ models_remove() {
 INSTALLER="${KILN_DIR:-/opt/kiln}/scripts/kiln-install.sh"
 advanced_page() {
 	while :; do
-		sel=$(menu "System" "system actions -- each asks to confirm; some need a reboot" \
+		sel=$(menu_nt "System" "system actions -- each asks to confirm; some need a reboot" \
 			reload "reload the rknpu driver (rmmod + modprobe)" \
 			driver "rebuild the rknpu DKMS module + restore wifi" \
 			update "update Kiln (git pull + rebuild driver/runtimes; NO kernel change)" \
@@ -435,13 +450,13 @@ run_installer() {
 # ---------------------------------------------------------------------------
 [ -f "$CONF" ] || msg "No $CONF yet -- run the installer, or I'll create it on first save. Built-in defaults apply until then."
 while :; do
-	sel=$(menu "Kiln" "$(status_summary)" \
-		status "Status & diagnostics        (kiln-doctor)" \
-		llm    "LLM settings                ([llm])" \
-		vision "Vision settings             ([vision]: classify / detect)" \
-		server "API server                  ([server] + kiln-serve)" \
-		models "Models — get · convert · set   (you supply the models)" \
-		system "System — driver · kernel · wifi · update" \
+	sel=$(menu_nt "Kiln" "$(status_summary)" \
+		status "Status & diagnostics   (kiln-doctor)" \
+		llm    "LLM settings           ([llm])" \
+		vision "Vision settings        ([vision]: classify / detect)" \
+		server "API server             ([server] + kiln-serve)" \
+		models "Models                 (get · convert · set — you supply them)" \
+		system "System                 (driver · kernel · wifi · update)" \
 		quit   "Quit") || break
 	case "$sel" in
 		status) status_page ;;

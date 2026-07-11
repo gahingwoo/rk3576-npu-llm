@@ -42,7 +42,7 @@ status_line() {
 serve_menu() {
 	if have systemctl && systemctl list-unit-files 2>/dev/null | grep -q '^kiln-serve'; then
 		st=$(systemctl is-active kiln-serve 2>/dev/null || echo unknown)
-		a=$(whiptail --backtitle "$BT" --title "API server (kiln-serve: $st)" --menu \
+		a=$(whiptail --backtitle "$BT" --title "API server (kiln-serve: $st)" --notags --menu \
 			"OpenAI-compatible API for the LLM (+ optional vision)." 18 70 7 -- \
 			start   "start now" \
 			stop    "stop" \
@@ -67,7 +67,7 @@ menu_loop() {
 		usage; exit 0
 	fi
 	while :; do
-		sel=$(whiptail --backtitle "$BT" --title "Kiln" --menu "$(status_line)" 20 76 8 -- \
+		sel=$(whiptail --backtitle "$BT" --title "Kiln" --notags --menu "$(status_line)" 20 76 8 -- \
 			chat   "Chat with an LLM               (kiln-chat)" \
 			vision "Classify / detect an image     (kiln-vision)" \
 			models "Get / convert a model          (kiln-convert)" \
