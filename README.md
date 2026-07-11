@@ -109,7 +109,7 @@ Three tools, one config (`/etc/kiln/config.ini`, read by all of them):
 - **`kiln-convert`** — get/convert a model to a `.rknn` **on the board** (a private
   `rknn-toolkit2` venv pinned to the runtime): `kiln-convert mobilenet` / `yolov8n`, or
   a local ONNX / URL. No x86 host, no scp. See [`docs/TOOLS.md`](docs/TOOLS.md).
-- **`kiln-doctor`** — a plain-English ✓/✗ health check (driver loaded, MMU banks,
+- **`kiln-doctor`** — a plain-English pass/fail health check (driver loaded, MMU banks,
   models present + version-matched, …). Exits non-zero on any critical fault, so
   it's the "paste this before opening an issue" tool.
 

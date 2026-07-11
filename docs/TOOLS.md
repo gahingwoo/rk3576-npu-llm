@@ -7,9 +7,10 @@ third builds a `.rknn` on the board and can point the config at it.
 
 ## kiln-doctor — health check
 
-`kiln-doctor` prints a plain-English ✓/✗ report and **exits non-zero if any critical
-check fails**, so it is scriptable and is the "paste this before opening an issue"
-tool. It is also the engine behind kiln-config's Status page.
+`kiln-doctor` prints a plain-English pass/fail report — aligned `[ OK ]` / `[FAIL]` /
+`[WARN]` / `[INFO]` labels, one per check — and **exits non-zero if any critical check
+fails**, so it is scriptable and is the "paste this before opening an issue" tool. It
+is also the engine behind kiln-config's Status page.
 
 ```sh
 kiln-doctor          # full report
@@ -47,7 +48,7 @@ Top menu:
 
 | page | what |
 |---|---|
-| **Status** | runs `kiln-doctor`, renders the ✓/✗ report, with a Re-run button |
+| **Status** | runs `kiln-doctor`, renders the pass/fail report, with a Re-run button |
 | **LLM** | `[llm]` — model (picker), temperature, top_k/top_p, max_new_tokens, max_context_len, repeat_penalty, keep_history, system_prompt |
 | **Vision** | `[vision]` — task (classify/detect), model (picker), labels (picker), top_n, detector/conf/nms, core_mask, priority |
 | **Server** | `[server]` host/port + `systemctl` control of `kiln-serve` |

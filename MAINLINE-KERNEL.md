@@ -83,7 +83,7 @@ Then verify:
 uname -r                          # <ver> (mainline 7.1.3)
 sudo dmesg | grep -i rknpu        # kiln mmu enable_all: ... st=0x19/0x19/0x19/0x19; NO -110
 ls /dev/dri/renderD*              # renderD129 (NPU)
-kiln-doctor                       # ✓/✗ health report ("paste this in issues")
+kiln-doctor                       # pass/fail health report ("paste this in issues")
 kiln-vision /opt/models/test.jpg  # needs a MobileNet .rknn in /opt/models — see VISION.md
 kiln-chat                         # needs a *.rkllm in /opt/models
 ```

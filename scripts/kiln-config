@@ -83,6 +83,17 @@ menu()  { mt=$1; mp=$2; shift 2; $UI --backtitle "$BT" --title "$mt" --menu "$mp
 
 short() { s=$1; [ -z "$s" ] && { echo "(unset)"; return; }; b=$(basename "$s" 2>/dev/null); echo "${b:-$s}"; }
 
+# One-line live status for the main-menu subtitle (armbian-config style): NPU driver
+# state + the LLM / vision model that will actually load + the vision task. Recomputed
+# each loop, so it reflects a model you just set or converted without leaving the menu.
+status_summary() {
+	snpu="down"; grep -q '^rknpu' /proc/modules 2>/dev/null && snpu="loaded"
+	sllm=$(kiln_ini_get "$CONF" llm model); [ -n "$sllm" ] || sllm=$(ls "$MODELS_DIR"/*.rkllm 2>/dev/null | head -1)
+	svis=$(kiln_ini_get "$CONF" vision model); [ -n "$svis" ] || svis=$(ls "$MODELS_DIR"/*.rknn 2>/dev/null | head -1)
+	svt=$(kiln_ini_get "$CONF" vision task); [ -n "$svt" ] || svt=classify
+	printf 'NPU: %s   LLM: %s   Vision: %s (%s)' "$snpu" "$(short "$sllm")" "$(short "$svis")" "$svt"
+}
+
 # edit_opt VARNAME "prompt" -- inputbox that distinguishes Cancel (keep old) from
 # clearing to empty (a valid value for e.g. system_prompt). Sets MOD on a change.
 edit_opt() {
@@ -424,7 +435,7 @@ run_installer() {
 # ---------------------------------------------------------------------------
 [ -f "$CONF" ] || msg "No $CONF yet -- run the installer, or I'll create it on first save. Built-in defaults apply until then."
 while :; do
-	sel=$(menu "Kiln" "Configure Kiln — pick a section  (Up/Down, Enter; Esc quits):" \
+	sel=$(menu "Kiln" "$(status_summary)" \
 		status "Status & diagnostics        (kiln-doctor)" \
 		llm    "LLM settings                ([llm])" \
 		vision "Vision settings             ([vision]: classify / detect)" \
