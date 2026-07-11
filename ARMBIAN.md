@@ -29,7 +29,7 @@ into that kernel's DTB (`kernel-patches/0004`), so no DT overlay is involved.
 | `rknpu.ko` (vendor v0.9.8 + Kiln patch) | kernel modules | DKMS (rebuilds on kernel upgrade) |
 | `librkllmrt.so` / `librknnrt.so` (+ `libgomp`) | `/usr/lib` | fetched |
 | `kiln-chat`, `kiln-vision`, `kiln-serve` | `/usr/bin` | built / copied |
-| `kiln-doctor` (health check), `kiln-config` (config TUI), `kiln-convert` (on-board model conversion) | `/usr/bin` | copied (always) |
+| `kiln` (launcher/menu), `kiln-doctor` (health check), `kiln-config` (config TUI), `kiln-convert` (on-board model conversion) | `/usr/bin` | copied (always) |
 | model `*.rkllm` / `*.rknn` | `/opt/models` | you provide (or `kiln-convert` builds one) |
 
 The NPU device node ships **in the Kiln kernel's DTB** (kernel-patches/0004), so
@@ -60,6 +60,7 @@ reboots doesn't matter. **Don't cut power.**
 ```sh
 curl -fsSL https://raw.githubusercontent.com/gahingwoo/kiln/main/scripts/kiln-install.sh | bash
 # ...it reboots twice on its own; when done you'll see "Kiln installed" at login.
+kiln                                  # menu: chat / vision / models / serve / config / doctor
 kiln-doctor                           # confirm health (paste this in issues)
 kiln-config                           # optional: TUI to set models / knobs / server
 

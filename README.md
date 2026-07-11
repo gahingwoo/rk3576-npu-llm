@@ -20,17 +20,17 @@ mainline**: those ten patches are required (see *Why it needs kernel patches*).
 
 ## Is this for you?
 
-- **You have** any **RK3576** device that can run a mainline kernel — the module,
-  runtimes, and tools are **board-agnostic** (the NPU IP is the same silicon). The
-  one-command **Armbian** installer is **tested on the Radxa ROCK 4D**; another RK3576
-  board works the same way once its board DTB carries the NPU node + the `vdd_npu`
-  regulator fix (see *Why it needs kernel patches*). Initial **RK3568** (ROCK 3B,
-  vision-only) support is in but **untested** — help wanted.
+- **You have** a Radxa **ROCK 4D (RK3576)** on **Armbian** — **the only hardware Kiln
+  is tested on.** The module, runtimes, and tools are board-agnostic (the NPU is the
+  same silicon), so another RK3576 board *should* work once its board DTB carries the
+  NPU node + the `vdd_npu` regulator fix (see *Why it needs kernel patches*) — but that
+  is **untested; help wanted.** Initial **RK3568** (ROCK 3B, vision-only) support is
+  implemented but **also untested on hardware**.
 - **You want** local **LLM + vision** inference on the NPU on a **mainline** kernel,
   not the vendor 6.1 BSP.
-- **You get** one command → `kiln-chat`, `kiln-vision`, `kiln-serve` (OpenAI-compatible
-  API), plus `kiln-config` (TUI), `kiln-convert` (on-board model conversion) and
-  `kiln-doctor` (health check).
+- **You get** one command → then `kiln` opens a menu (or run `kiln-chat`, `kiln-vision`,
+  `kiln-serve` — the OpenAI-compatible API — directly); plus `kiln-config` (TUI),
+  `kiln-convert` (on-board model conversion) and `kiln-doctor` (health check).
 - **Not for you** if you're staying on the vendor **6.1 BSP** kernel. Vision is mainly
   **image classification** (MobileNet); **object detection (YOLO)** works but is newer
   and tested on fewer models — see [`VISION.md`](VISION.md).
@@ -47,6 +47,11 @@ Verified on a **mainline `linux-7.1.3`** kernel built by CI with Kiln's patch se
 (`kernel-patches/` 0001–0010), and earlier on a hand-built `linux-next` 7.1 image.
 The runtime/driver/platform version-lock passes on the board (`rkllm 1.2.0` +
 `rknpu 0.9.8` + `RK3576`); `.rkllm`/`.rknn` models must match the runtime version.
+
+> **Tested hardware:** a single **Radxa ROCK 4D (RK3576) on Armbian**, and nothing
+> else. Other RK3576 boards and the RK3568 (ROCK 3B) path are *implemented* but have
+> **not** run on hardware — they are "should work", not "does work". Reports from other
+> boards (a `kiln-doctor` paste in an issue) are the most useful thing you can send.
 
 - **Serial log** — boot → `rknpu 0.9.8` loads → all four MMU banks enabled → vision
   + chat, both on the NPU:
@@ -79,7 +84,10 @@ patches, per-patch rationale) and [`driver/patches/README.md`](driver/patches/RE
 
 ## Serve & configure
 
-Three tools, one config (`/etc/kiln/config.ini`, read by all of them):
+**`kiln`** is the umbrella command: run **`kiln`** with no arguments for a menu to pick
+a function, or jump straight in — `kiln chat`, `kiln vision <img>`, `kiln models`
+(get/convert), `kiln serve`, `kiln config`, `kiln doctor`. The individual tools, all
+reading one config (`/etc/kiln/config.ini`):
 
 - **`kiln-serve`** — an **OpenAI-compatible** HTTP API for the LLM. Point the
   `openai` SDK / LangChain / any OpenAI client at the board:
@@ -182,9 +190,9 @@ adds / removes models, and `kiln-doctor` checks a model is present and version-m
   `rknn_mobilenet.cpp`
 - `scripts/` — `kiln-install.sh` (one-shot installer, with a whiptail front-end on a
   terminal) + `kiln-phase2.sh` (offline phase-2 systemd handoff, runs after the first
-  auto-reboot), `kiln-doctor` (health check), `kiln-config` (whiptail config TUI),
-  `kiln-convert` (on-board model conversion), `build-dual-kernel-tree.sh` (maintainer
-  dual-image tree); see [`scripts/README.md`](scripts/README.md)
+  auto-reboot), `kiln` (umbrella launcher/menu), `kiln-doctor` (health check),
+  `kiln-config` (whiptail config TUI), `kiln-convert` (on-board model conversion),
+  `build-dual-kernel-tree.sh` (maintainer dual-image tree); see [`scripts/README.md`](scripts/README.md)
 - `docs/` — tool references (`SERVER.md`, `CHAT.md`, `CONFIG.md`, `TOOLS.md`) + the
   full [documentation index](docs/README.md)
 - `ARMBIAN.md`, `MAINLINE-KERNEL.md`, `VISION.md`, `RK3568.md` — install/kernel/board paths

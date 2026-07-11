@@ -1,9 +1,27 @@
-# kiln-doctor, kiln-config & kiln-convert
+# kiln, kiln-doctor, kiln-config & kiln-convert
 
-Three helpers installed to `/usr/bin` alongside `kiln-chat` / `kiln-vision` /
-`kiln-serve`: a health check, a config TUI, and an on-board model converter. The
-first two read the same `/etc/kiln/config.ini` (see [`CONFIG.md`](CONFIG.md)); the
-third builds a `.rknn` on the board and can point the config at it.
+Helpers installed to `/usr/bin` alongside `kiln-chat` / `kiln-vision` / `kiln-serve`:
+an umbrella launcher, a health check, a config TUI, and an on-board model converter.
+
+## kiln — the launcher
+
+`kiln` with no arguments opens a menu (whiptail) to pick a function; it also dispatches
+straight to a tool:
+
+```sh
+kiln                 # menu: chat · vision · models · serve · config · doctor
+kiln chat            # -> kiln-chat        (LLM chat CLI)
+kiln vision <img>    # -> kiln-vision      (classify / detect; a 2nd path saves an annotated copy)
+kiln models          # -> kiln-convert     (get / convert a model on the board)
+kiln serve           # -> kiln-serve       (or start/stop the systemd service from the menu)
+kiln config          # -> kiln-config
+kiln doctor          # -> kiln-doctor
+```
+
+It only launches the tools below; each handles its own privileges (`kiln-config` /
+`kiln-doctor` re-exec via `sudo` themselves). The tools read the same
+`/etc/kiln/config.ini` (see [`CONFIG.md`](CONFIG.md)); `kiln-convert` builds a `.rknn`
+on the board and can point the config at it.
 
 ## kiln-doctor — health check
 

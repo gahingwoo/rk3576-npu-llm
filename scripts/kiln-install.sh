@@ -649,7 +649,7 @@ fi
 # Diagnostic + config + model-conversion CLIs. Installed UNCONDITIONALLY (tiny, and
 # useful even on a KILN_SKIP_RUNTIMES run) so they are always on PATH. kiln-convert
 # gets/converts models on the board (rknn-toolkit2 in a private venv, lazily).
-for t in kiln-doctor kiln-config kiln-convert; do
+for t in kiln kiln-doctor kiln-config kiln-convert; do
 	[ -f "scripts/$t" ] && $SUDO install -m0755 "scripts/$t" "/usr/bin/$t" || true
 done
 

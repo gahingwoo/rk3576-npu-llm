@@ -18,7 +18,7 @@ All read one config, `/etc/kiln/config.ini`.
 | doc | tool |
 |---|---|
 | [CONFIG.md](CONFIG.md) | `/etc/kiln/config.ini` — every field, and how to edit it (by hand or via `kiln-config`). |
-| [TOOLS.md](TOOLS.md) | `kiln-doctor` (pass/fail health check), `kiln-config` (whiptail config TUI), `kiln-convert` (on-board model conversion). |
+| [TOOLS.md](TOOLS.md) | `kiln` (umbrella launcher / menu), `kiln-doctor` (pass/fail health check), `kiln-config` (whiptail config TUI), `kiln-convert` (on-board model conversion). |
 | [CHAT.md](CHAT.md) | `kiln-chat` — the interactive LLM CLI and its slash commands. |
 | [SERVER.md](SERVER.md) | `kiln-serve` — the OpenAI-compatible HTTP API (LLM + optional vision). |
 | [VISION.md](../VISION.md) | `kiln-vision` — MobileNet image classification + YOLO object detection, and how to build an `.rknn` (`kiln-convert`). |

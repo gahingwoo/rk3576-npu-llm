@@ -141,7 +141,7 @@ nms_iou = 0.45
 ```
 
 Then `kiln-vision image.jpg [out.jpg]` prints boxes and, given a second image path,
-saves `out.jpg` with the boxes drawn on it; `kiln-serve` exposes
+saves `out.jpg` with the boxes and `<class> <score>` labels drawn on it; `kiln-serve` exposes
 `POST /v1/vision/detect`; and `kiln-config` → Vision flips the task. Build the `.rknn`
 with `kiln-convert` (which pins `rknn-toolkit2` to your runtime), or convert it the
 same way as classification on an x86 host.
@@ -153,8 +153,9 @@ a clean alternative if you want to avoid AGPL — and its decode head is impleme
 
 **Roadmap:** confirm/adjust the `auto` family + output-order assumptions on the other
 exports (v5/v7 anchors, YOLOX, yolo-raw) as they're tried; the int8-gating speed
-optimization (the foundation reads floats for correctness); and class-name text on the
-drawn overlay (boxes are drawn now, labels are printed to the console).
+optimization (the foundation reads floats for correctness). Boxes **and** class-name +
+score labels are drawn on the saved image (a bundled 8x13 bitmap font), and also
+printed to the console.
 
 ## Why "control experiment"
 

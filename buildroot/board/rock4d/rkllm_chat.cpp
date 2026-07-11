@@ -30,6 +30,25 @@
 #include <readline/history.h>
 #endif
 
+// ---- colour (only when stdout is a terminal) -------------------------------
+// C_* are empty strings when not a tty, so every printf is unconditional.
+static const char *C_PROMPT = "", *C_BOT = "", *C_DIM = "", *C_TITLE = "", *C_RST = "";
+static void init_colors() {
+    if (isatty(STDOUT_FILENO)) {
+        C_PROMPT = "\033[1;36m";   // bold cyan  (your prompt)
+        C_BOT    = "\033[1;32m";   // bold green (model label)
+        C_DIM    = "\033[2m";      // dim        (bench / notes)
+        C_TITLE  = "\033[1;36m";   // banner
+        C_RST    = "\033[0m";
+    }
+}
+// Build a readline-safe coloured prompt: the escape codes are wrapped in
+// \001..\002 (RL_PROMPT_{START,END}_IGNORE) so readline's cursor math counts only
+// the visible width. The plain-read fallback strips those two marker bytes.
+static std::string mkprompt(const char *label) {
+    return std::string("\001") + C_PROMPT + "\002" + label + "\001" + C_RST + "\002";
+}
+
 // Read one input line. With readline you get cursor editing (backspace, left/
 // right, Home/End), up/down history recall, and correct UTF-8 -- so Chinese input
 // edits properly. Without it (no libreadline at build) it falls back to a plain
@@ -43,7 +62,9 @@ static bool read_input(const char *prompt, std::string &out) {
     free(line);
     return true;
 #else
-    fputs(prompt, stdout); fflush(stdout);
+    std::string clean;   // drop the \001/\002 readline markers for a plain terminal
+    for (const char *p = prompt; *p; p++) if (*p != '\001' && *p != '\002') clean += *p;
+    fputs(clean.c_str(), stdout); fflush(stdout);
     return (bool)std::getline(std::cin, out);
 #endif
 }
@@ -386,26 +407,29 @@ int main(int argc, char **argv) {
     }
 
     signal(SIGINT, on_sigint);
-    printf("rkllm init start\n");
+    init_colors();
+    printf("%s[kiln] loading %s onto the NPU (a few seconds) ...%s\n",
+           C_DIM, base_of(cfg.llm_model).c_str(), C_RST);
+    fflush(stdout);
 
     KilnLLM llm;
     g_llm = &llm;
     if (llm.init(cfg) != 0) { printf("rkllm init failed\n"); return -1; }
-    printf("rkllm init success\n");
 
     ChatState st;
     st.base_system = cfg.llm_system_prompt;
     st.model_dir   = dir_of(cfg.llm_model);
 
-    printf("=== Kiln RK3576 NPU LLM (librkllmrt) ===\n");
-    printf("model: %s | history: %s\n", base_of(cfg.llm_model).c_str(),
-           cfg.llm_keep_history ? "multi-turn" : "single-turn");
-    printf("Type a message, or /help for commands.\n");
+    printf("\n%s=== Kiln  ·  RK3576 NPU LLM  ·  %s ===%s\n",
+           C_TITLE, base_of(cfg.llm_model).c_str(), C_RST);
+    printf("%shistory %s   ·   type a message, or /help for commands%s\n",
+           C_DIM, cfg.llm_keep_history ? "multi-turn" : "single-turn", C_RST);
 
+    const std::string prompt = mkprompt("you > ");   // ASCII '>' keeps readline's cursor math exact
     while (true) {
         std::string input;
         printf("\n");
-        if (!read_input("user: ", input)) break;   // Ctrl-D / EOF
+        if (!read_input(prompt.c_str(), input)) break;   // Ctrl-D / EOF
         input = trim(input);
         if (input.empty()) continue;
 
@@ -414,7 +438,7 @@ int main(int argc, char **argv) {
             continue;
         }
 
-        printf("robot: ");
+        printf("%sbot >%s ", C_BOT, C_RST);
         fflush(stdout);
         GenResult r = generate(llm, input, cfg.llm_keep_history != 0, /*echo*/true);
         if (r.error) continue;
@@ -423,8 +447,8 @@ int main(int argc, char **argv) {
 
         double decode_ms = r.total - (r.ttft < 0 ? 0 : r.ttft);
         double tps = (r.ntok > 1 && decode_ms > 0) ? (r.ntok - 1) * 1000.0 / decode_ms : 0.0;
-        printf("\n[bench] tokens=%ld  prefill(TTFT)=%.0f ms  decode=%.1f tok/s  total=%.0f ms\n",
-               r.ntok, r.ttft < 0 ? 0.0 : r.ttft, tps, r.total);
+        printf("\n%s[bench] tokens=%ld  prefill(TTFT)=%.0f ms  decode=%.1f tok/s  total=%.0f ms%s\n",
+               C_DIM, r.ntok, r.ttft < 0 ? 0.0 : r.ttft, tps, r.total, C_RST);
     }
     return 0;
 }

@@ -1,0 +1,105 @@
+#!/bin/sh
+# kiln -- one entry point for everything. Run `kiln` with no arguments to open a
+# menu (whiptail) and pick what to do; or dispatch a tool directly:
+#
+#   kiln                 open the menu
+#   kiln chat [args]     -> kiln-chat     (LLM chat CLI)
+#   kiln vision <img>    -> kiln-vision   (classify / detect an image)
+#   kiln models [args]   -> kiln-convert  (get / convert a model on the board)
+#   kiln serve [args]    -> kiln-serve    (OpenAI-compatible API server)
+#   kiln config          -> kiln-config   (settings TUI)
+#   kiln doctor [args]   -> kiln-doctor   (health check)
+#
+# It only launches the other tools; each handles its own privileges (kiln-config /
+# kiln-doctor re-exec via sudo themselves). Kept POSIX sh so it runs on busybox.
+
+BT="Kiln  ·  LLM + vision on the RK3576 NPU"
+
+usage() {
+	# print the leading comment block (after the shebang), stripped of the '# '
+	awk 'NR==1{next} /^#/{sub(/^# ?/,"");print;next} {exit}' "$0"
+}
+
+have() { command -v "$1" >/dev/null 2>&1; }
+
+# Run a tool on the real terminal (not inside whiptail), then pause so its output is
+# readable before returning to the menu. Used for the menu path only.
+run_pause() {
+	clear 2>/dev/null || true
+	if have "$1"; then "$@"; rc=$?; else printf '%s is not installed.\n' "$1"; rc=127; fi
+	printf '\n[kiln] %s exited %d -- press Enter to return to the menu ...' "$1" "$rc"
+	read -r _ 2>/dev/null || true
+}
+
+# NPU + model summary for the menu subtitle.
+status_line() {
+	npu=down; grep -q '^rknpu' /proc/modules 2>/dev/null && npu=loaded
+	llm=no; ls /opt/models/*.rkllm >/dev/null 2>&1 && llm=yes
+	vis=no; ls /opt/models/*.rknn  >/dev/null 2>&1 && vis=yes
+	printf 'NPU: %s    models  LLM:%s  Vision:%s    ·  pick what to run:' "$npu" "$llm" "$vis"
+}
+
+serve_menu() {
+	if have systemctl && systemctl list-unit-files 2>/dev/null | grep -q '^kiln-serve'; then
+		st=$(systemctl is-active kiln-serve 2>/dev/null || echo unknown)
+		a=$(whiptail --backtitle "$BT" --title "API server (kiln-serve: $st)" --menu \
+			"OpenAI-compatible API for the LLM (+ optional vision)." 18 70 7 -- \
+			start   "start now" \
+			stop    "stop" \
+			restart "restart (apply config changes)" \
+			enable  "enable + start at boot" \
+			status  "show status" \
+			fg      "run in the foreground (Ctrl-C to stop)" 3>&1 1>&2 2>&3) || return
+		case "$a" in
+			start|stop|restart) run_pause sudo systemctl "$a" kiln-serve ;;
+			enable)             run_pause sudo systemctl enable --now kiln-serve ;;
+			status)             run_pause sh -c 'systemctl status kiln-serve --no-pager | head -n 20' ;;
+			fg)                 run_pause kiln-serve ;;
+		esac
+	else
+		run_pause kiln-serve   # no systemd unit -> just run it in the foreground
+	fi
+}
+
+menu_loop() {
+	if ! have whiptail; then
+		echo "kiln: whiptail not found -- use the subcommands directly:"; echo
+		usage; exit 0
+	fi
+	while :; do
+		sel=$(whiptail --backtitle "$BT" --title "Kiln" --menu "$(status_line)" 20 76 8 -- \
+			chat   "Chat with an LLM               (kiln-chat)" \
+			vision "Classify / detect an image     (kiln-vision)" \
+			models "Get / convert a model          (kiln-convert)" \
+			serve  "API server: start / stop       (kiln-serve)" \
+			config "Settings & diagnostics         (kiln-config)" \
+			doctor "Health check                   (kiln-doctor)" \
+			quit   "Quit" 3>&1 1>&2 2>&3) || break
+		case "$sel" in
+			chat)   run_pause kiln-chat ;;
+			vision)
+				img=$(whiptail --backtitle "$BT" --title "kiln-vision" --inputbox \
+					"Image to run (a second path saves an annotated copy for detection):" \
+					9 70 "/opt/models/test.jpg" 3>&1 1>&2 2>&3) || continue
+				[ -n "$img" ] && run_pause sh -c 'kiln-vision "$@"' _ $img ;;
+			models) run_pause kiln-convert ;;
+			serve)  serve_menu ;;
+			config) run_pause kiln-config ;;
+			doctor) run_pause kiln-doctor ;;
+			quit|"") break ;;
+		esac
+	done
+	clear 2>/dev/null || true
+}
+
+case "${1:-}" in
+	chat|c)               shift; exec kiln-chat "$@" ;;
+	vision|v)             shift; exec kiln-vision "$@" ;;
+	models|model|convert) shift; exec kiln-convert "$@" ;;
+	serve)                shift; exec kiln-serve "$@" ;;
+	config|cfg)           shift; exec kiln-config "$@" ;;
+	doctor|dr)            shift; exec kiln-doctor "$@" ;;
+	-h|--help|help)       usage ;;
+	"")                   menu_loop ;;
+	*) echo "kiln: unknown command '$1'" >&2; echo >&2; usage >&2; exit 1 ;;
+esac

@@ -101,7 +101,7 @@ if [ -f /usr/lib/librknnrt.so ]; then ok "librknnrt.so   $(sover /usr/lib/librkn
 
 # --- tools -----------------------------------------------------------------
 hdr "Tools"
-for t in kiln-chat kiln-vision kiln-config kiln-convert rkllm_demo rknn_mobilenet; do
+for t in kiln kiln-chat kiln-vision kiln-config kiln-convert rkllm_demo rknn_mobilenet; do
 	if command -v "$t" >/dev/null 2>&1; then ok "$t"; else warn "$t not installed in PATH"; fi
 done
 

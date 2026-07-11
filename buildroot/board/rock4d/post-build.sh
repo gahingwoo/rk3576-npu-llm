@@ -75,7 +75,7 @@ build_one "$KILN/buildroot/board/rock4d/rknn_mobilenet.cpp" "$TARGET_DIR/usr/bin
 # needs python3-venv + network at convert time) -- same diagnostic/config/convert
 # tools as the Armbian installer. kiln-chat/kiln-vision and the login MOTD come from
 # the rootfs overlay (buildroot/rootfs/); these live in scripts/, so install here.
-for t in kiln-doctor kiln-config kiln-convert; do
+for t in kiln kiln-doctor kiln-config kiln-convert; do
 	[ -f "$KILN/scripts/$t" ] && install -D -m0755 "$KILN/scripts/$t" "$TARGET_DIR/usr/bin/$t" \
 		&& echo "[kiln] installed $t -> /usr/bin/"
 done
