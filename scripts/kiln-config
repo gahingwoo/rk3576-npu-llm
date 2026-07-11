@@ -210,7 +210,12 @@ vision_page() {
 			task)
 				n=$(radio_pick "Vision task:" "$v_task" classify detect)
 				if [ "$n" = detect ] && [ "$v_task" != detect ]; then
-					msg "task=detect is EXPERIMENTAL (YOLOv8/11) and UNVERIFIED on hardware -- boxes may be wrong. You supply a YOLOv8/11 .rknn (Ultralytics YOLO is AGPL-3.0; YOLOX is Apache-2.0). See VISION.md."
+					msg "task=detect is EXPERIMENTAL and UNVERIFIED on hardware -- boxes may be wrong. You supply a YOLO .rknn exported with NMS OFF (end2end/NMS-in-model crashes the NPU). Ultralytics YOLO is AGPL-3.0; YOLOX is Apache-2.0. See VISION.md."
+					# detection uses COCO-80 labels, not ImageNet -- offer to switch
+					if [ -f "$MODELS_DIR/coco_80_labels.txt" ] && ! echo "$v_labels" | grep -qi coco; then
+						yesno "Detection uses COCO-80 class names, not ImageNet. Switch labels to coco_80_labels.txt?" \
+							&& { v_labels="$MODELS_DIR/coco_80_labels.txt"; MOD=1; }
+					fi
 				fi
 				setmod v_task "$n" ;;
 			model)
