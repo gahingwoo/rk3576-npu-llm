@@ -99,29 +99,31 @@ radio_pick() {
 	[ -n "$sel" ] && echo "$sel" || echo "$cur"
 }
 
-# model_pick EXT current  -> scan $MODELS_DIR/*.EXT, present a menu, echo chosen path.
-# Shows clean basenames (+ size), not full paths; reconstructs the path on choice.
-model_pick() {
-	ext=$1; cur=$2
+# file_pick EXT NOUN current  -> scan $MODELS_DIR/*.EXT, present a menu, echo chosen
+# path. Shows clean basenames + a size/line-count column, not full paths; rebuilds the
+# path on choice. Used for models (.rkllm/.rknn) and label files (.txt).
+file_pick() {
+	ext=$1; noun=$2; cur=$3
 	set --
 	for f in "$MODELS_DIR"/*."$ext"; do
 		[ -f "$f" ] || continue
-		sz=$(du -h "$f" 2>/dev/null | cut -f1)
-		set -- "$@" "$(basename "$f")" "${sz:-?}"
+		case "$ext" in txt) meta="$(wc -l < "$f" 2>/dev/null) lines" ;; *) meta="$(du -h "$f" 2>/dev/null | cut -f1)" ;; esac
+		set -- "$@" "$(basename "$f")" "${meta:-?}"
 	done
 	if [ "$#" -eq 0 ]; then
-		msg "No *.$ext models found in $MODELS_DIR.\n\nDrop one there (see Models page, or VISION.md), then come back."
+		msg "No *.$ext $noun files found in $MODELS_DIR.\n\nDrop one there, then come back."
 		echo "$cur"; return
 	fi
 	set -- "$@" "(type a path)" "enter a full path by hand"
-	[ -n "$cur" ] && set -- "$@" "(unset)" "clear this model"
-	sel=$(menu "Pick a model" "current: $(short "$cur")     ($MODELS_DIR)" "$@") || { echo "$cur"; return; }
+	[ -n "$cur" ] && set -- "$@" "(unset)" "clear this $noun"
+	sel=$(menu "Pick a $noun" "current: $(short "$cur")     ($MODELS_DIR)" "$@") || { echo "$cur"; return; }
 	case "$sel" in
-		"(type a path)") input "Full path to the model file:" "$cur" ;;
+		"(type a path)") input "Full path to the $noun file:" "$cur" ;;
 		"(unset)")       echo "" ;;
 		*)               echo "$MODELS_DIR/$sel" ;;   # basename -> full path
 	esac
 }
+model_pick() { file_pick "$1" model "$2"; }
 
 # ---------------------------------------------------------------------------
 # 1. Status & Diagnostics
@@ -210,7 +212,7 @@ vision_page() {
 			task)
 				n=$(radio_pick "Vision task:" "$v_task" classify detect)
 				if [ "$n" = detect ] && [ "$v_task" != detect ]; then
-					msg "task=detect is EXPERIMENTAL and UNVERIFIED on hardware -- boxes may be wrong. You supply a YOLO .rknn exported with NMS OFF (end2end/NMS-in-model crashes the NPU). Ultralytics YOLO is AGPL-3.0; YOLOX is Apache-2.0. See VISION.md."
+					msg "Object detection (YOLO). You supply a .rknn exported with NMS OFF -- an end2end / NMS-in-model export crashes the NPU. Ultralytics YOLO is AGPL-3.0; YOLOX is Apache-2.0. See VISION.md."
 					# detection uses COCO-80 labels, not ImageNet -- offer to switch
 					if [ -f "$MODELS_DIR/coco_80_labels.txt" ] && ! echo "$v_labels" | grep -qi coco; then
 						yesno "Detection uses COCO-80 class names, not ImageNet. Switch labels to coco_80_labels.txt?" \
@@ -224,7 +226,9 @@ vision_page() {
 					*)      msg "Classification: pick a classification .rknn (e.g. MobileNet). Detection is a separate task (set task=detect)." ;;
 				esac
 				n=$(model_pick rknn "$v_model"); [ "$n" != "$v_model" ] && { v_model=$n; MOD=1; } ;;
-			labels)    edit_opt v_labels "Labels file (one per line; ImageNet-1000 for classify, COCO-80 for detect):" ;;
+			labels)
+				msg "Labels: one class per line. ImageNet-1000 for classify (imagenet_labels.txt); COCO-80 for detect (coco_80_labels.txt)."
+				n=$(file_pick txt labels "$v_labels"); [ "$n" != "$v_labels" ] && { v_labels=$n; MOD=1; } ;;
 			top_n)     n=$(input "How many top classes to print (classify):" "$v_topn"); setmod v_topn "$n" ;;
 			detector)  n=$(radio_pick "Detection family (auto detects from output shapes):" "$v_det" auto yolov8 yolov5 yolox yoloraw end2end); setmod v_det "$n" ;;
 			conf)      n=$(input "Detection score threshold 0-1 (task=detect):" "$v_conf"); setmod v_conf "$n" ;;

@@ -79,14 +79,16 @@ top-5 of 1000 classes  (NPU inference 5.9 ms):
 `rknn_mobilenet` next to `rkllm_demo`, installs `librknnrt.so`, and bakes the test
 image + labels. A `mobilenetv2-12_rk3576.rknn` in `model/` is baked to `/opt/models/`.
 
-## Object detection — EXPERIMENTAL foundation
+## Object detection
 
-> **Status: experimental, NOT verified on hardware, OFF by default.** Kiln does not
-> claim working object detection. The pieces below are a *foundation* to build on.
+> **Status: works on-board, OFF by default.** Verified on a ROCK 4D (RK3576):
+> `yolov8n` correctly detects bicycle / truck / dog on the classic dog-bike-car image
+> at ~37 ms. Newer than the classifier and tested on fewer models, so treat a new
+> model as "confirm it once" — but the path is real, not a stub.
 
-The vision path is **classification only** by default. A separate, experimental
-detection path lives in `buildroot/board/rock4d/kiln_detect.h`, kept apart from the
-classifier so the working classify path is untouched. It is enabled by
+The vision path is **classification only** by default. A separate detection path lives
+in `buildroot/board/rock4d/kiln_detect.h`, kept apart from the classifier so the
+working classify path is untouched. It is enabled by
 `[vision] task = detect` and supports these YOLO families: **YOLOv8 / YOLO11**
 (anchor-free, DFL), **YOLOv5 / YOLOv7** (anchor-based), **YOLOX** (anchor-free +
 objectness), and **yolo-raw** — a *decoded but not-NMS'd* single `[1, N, 4+ncls]`

@@ -139,7 +139,7 @@ int main(int argc, char **argv) {
                     fprintf(stderr, "kiln-serve: detection disabled (%s)\n", detector->error());
                     detector.reset();
                 } else {
-                    printf("kiln-serve: detection ready [EXPERIMENTAL, unverified] (%s)\n", vc.vision_model.c_str());
+                    printf("kiln-serve: detection ready (%s)\n", vc.vision_model.c_str());
                 }
             } else {
                 vision.reset(new KilnVision());
@@ -273,9 +273,8 @@ int main(int argc, char **argv) {
                              {"inference_ms", ms}, {"top", top}}.dump(), "application/json");
     });
 
-    // EXPERIMENTAL object detection (config [vision] task = detect; YOLOv8/11).
-    // Same custom shape as classify: POST an image, get a list of boxes. UNVERIFIED
-    // on hardware -- boxes may be wrong. Disabled unless a detector loaded.
+    // Object detection (config [vision] task = detect; YOLO). Same custom shape as
+    // classify: POST an image, get a list of boxes. Disabled unless a detector loaded.
     srv.Post("/v1/vision/detect", [&](const httplib::Request &req, httplib::Response &res) {
         if (!detector) {
             res.status = 503;

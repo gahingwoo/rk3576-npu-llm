@@ -27,13 +27,9 @@ static bool ends_with(const std::string &s, const char *suf) {
     return s.size() >= t.size() && s.compare(s.size() - t.size(), t.size(), t) == 0;
 }
 
-// EXPERIMENTAL object-detection path (config [vision] task = detect). Kept separate
-// from the classifier; prints an honest "unverified" banner -- Kiln does not claim
-// working detection (see kiln_detect.h / VISION.md).
+// Object-detection path (config [vision] task = detect). Kept separate from the
+// classifier (see kiln_detect.h / VISION.md).
 static int run_detect(KilnConfig &cfg, const std::string &image, const std::string &save) {
-    fprintf(stderr,
-        "kiln-vision: task=detect is EXPERIMENTAL (YOLO, UNVERIFIED on hardware) --\n"
-        "             boxes may be wrong; see VISION.md. Use [vision] task=classify to disable.\n");
     KilnDetect d;
     if (d.init(cfg) != 0) { fprintf(stderr, "kiln-vision: %s\n", d.error()); return 1; }
     double ms = 0; std::string err;
