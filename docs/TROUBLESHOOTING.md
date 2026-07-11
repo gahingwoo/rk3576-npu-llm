@@ -55,7 +55,7 @@ sudo dpkg --configure -a
 
 ### `no /boot/armbianEnv.txt — this installer targets Armbian`
 The one-command installer targets **Armbian** userspace. On another distro, build the
-kernel yourself ([MAINLINE-KERNEL.md](../MAINLINE-KERNEL.md)) and install the module with
+kernel yourself ([MAINLINE-KERNEL.md](MAINLINE-KERNEL.md)) and install the module with
 DKMS.
 
 ### `aarch64 only (found …)`
@@ -98,7 +98,7 @@ driver or kernel — reinstall the Kiln driver and reboot.
 ### `SError` / hang on the very first inference
 A cold NPU power-on needs a settle delay + BIU reset + core "arm" that only the Kiln
 kernel patches provide. This is the reason a **stock** mainline kernel isn't enough; use
-the Kiln kernel (CI `.deb`s, or build per [MAINLINE-KERNEL.md](../MAINLINE-KERNEL.md)).
+the Kiln kernel (CI `.deb`s, or build per [MAINLINE-KERNEL.md](MAINLINE-KERNEL.md)).
 
 ---
 
@@ -152,7 +152,7 @@ tell). Export with **NMS OFF** and let Kiln do NMS on the CPU:
 yolo export model=yolov8n.pt format=onnx nms=False opset=19 imgsz=640
 kiln-convert ./yolov8n.onnx --set-active
 ```
-`kiln-convert yolov8n` already fetches an NMS-off export. See [VISION.md](../VISION.md).
+`kiln-convert yolov8n` already fetches an NMS-off export. See [VISION.md](VISION.md).
 
 ### Detection runs but the labels are wrong (e.g. `goldfish`, `cock`, `bulbul`)
 The **boxes/classes are correct**, but `[vision] labels` points at the **ImageNet-1000**

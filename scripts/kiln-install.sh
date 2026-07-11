@@ -19,7 +19,7 @@
 #     out-of-tree module can't supply it, and a stock kernel SError-freezes the
 #     NPU on the first inference). Prebuilt by CI, published as a release; the NPU
 #     node is baked into its dtb. It wires Armbian's u-boot to boot it.
-#     See kernel-patches/ and MAINLINE-KERNEL.md.
+#     See kernel-patches/ and docs/MAINLINE-KERNEL.md.
 #
 #   PHASE 2 — after you reboot into that kernel: builds the vendor rknpu driver
 #     (DKMS) and installs the RKLLM/RKNN runtimes and the kiln-chat / kiln-vision

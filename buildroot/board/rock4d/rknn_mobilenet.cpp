@@ -28,7 +28,7 @@ static bool ends_with(const std::string &s, const char *suf) {
 }
 
 // Object-detection path (config [vision] task = detect). Kept separate from the
-// classifier (see kiln_detect.h / VISION.md).
+// classifier (see kiln_detect.h / docs/VISION.md).
 static int run_detect(KilnConfig &cfg, const std::string &image, const std::string &save) {
     KilnDetect d;
     if (d.init(cfg) != 0) { fprintf(stderr, "kiln-vision: %s\n", d.error()); return 1; }

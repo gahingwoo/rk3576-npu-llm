@@ -26,7 +26,7 @@ Ten patches, applied in order. In brief:
 - **`0010` `regulator-always-on` on `vdd_npu_s0`** — the fix for the "works once,
   then the second inference hangs the board" bug. **The critical one for re-use.**
 
-Full per-patch rationale: [`kernel-patches/README.md`](kernel-patches/README.md).
+Full per-patch rationale: [`kernel-patches/README.md`](../kernel-patches/README.md).
 Mainline's own NPU path is the open `accel/rocket` driver (different `rknn_core`
 DT); Kiln uses the **vendor** `rknpu` module, so `0004` gives it a node to bind and
 the config leaves `CONFIG_DRM_ACCEL_ROCKET` off.

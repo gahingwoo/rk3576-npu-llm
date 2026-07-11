@@ -114,7 +114,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG=kiln-mainline-kernel-rk3568
-          NOTES="mainline linux-${KVER} for Radxa ROCK 3B (RK3568) + Kiln RK3568 NPU patches (NPU DT node, RK3568_PD_NPU, IOMMU v2 GFP_DMA32 fix). bindeb-pkg. UNTESTED on hardware -- pending ROCK 3B validation. Install per RK3568.md / kiln-install.sh."
+          NOTES="mainline linux-${KVER} for Radxa ROCK 3B (RK3568) + Kiln RK3568 NPU patches (NPU DT node, RK3568_PD_NPU, IOMMU v2 GFP_DMA32 fix). bindeb-pkg. UNTESTED on hardware -- pending ROCK 3B validation. Install per docs/RK3568.md / kiln-install.sh."
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release view "$TAG" --json assets --jq '.assets[].name' \
               | xargs -r -I{} gh release delete-asset "$TAG" {} -y || true

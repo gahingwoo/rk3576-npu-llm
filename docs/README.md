@@ -1,5 +1,7 @@
 # Kiln documentation
 
+**English** · [简体中文](zh/README.md)
+
 Start at the root [`README.md`](../README.md) — it's the overview and the install
 one-liner. This page is the full map.
 
@@ -7,8 +9,8 @@ one-liner. This page is the full map.
 
 | doc | what |
 |---|---|
-| [ARMBIAN.md](../ARMBIAN.md) | Install on Armbian — the one-command hands-off path (two auto-reboots), `KILN_MANUAL=1`, and the `KILN_SKIP_*` granular re-runs. |
-| [MAINLINE-KERNEL.md](../MAINLINE-KERNEL.md) | The mainline `linux-7.1.3` base + Kiln's NPU patch set; how CI builds it and the manual build/install. |
+| [ARMBIAN.md](ARMBIAN.md) | Install on Armbian — the one-command hands-off path (two auto-reboots), `KILN_MANUAL=1`, and the `KILN_SKIP_*` granular re-runs. |
+| [MAINLINE-KERNEL.md](MAINLINE-KERNEL.md) | The mainline `linux-7.1.3` base + Kiln's NPU patch set; how CI builds it and the manual build/install. |
 | [buildroot/README.md](../buildroot/README.md) | The flashable br2-external `sdcard.img` (rootfs + module + optional model) — the maintainer image path. |
 
 ## Tools
@@ -21,7 +23,7 @@ All read one config, `/etc/kiln/config.ini`.
 | [TOOLS.md](TOOLS.md) | `kiln` (umbrella launcher / menu), `kiln-doctor` (pass/fail health check), `kiln-config` (whiptail config TUI), `kiln-convert` (on-board model conversion). |
 | [CHAT.md](CHAT.md) | `kiln-chat` — the interactive LLM CLI and its slash commands. |
 | [SERVER.md](SERVER.md) | `kiln-serve` — the OpenAI-compatible HTTP API (LLM + optional vision). |
-| [VISION.md](../VISION.md) | `kiln-vision` — MobileNet image classification + YOLO object detection, and how to build an `.rknn` (`kiln-convert`). |
+| [VISION.md](VISION.md) | `kiln-vision` — MobileNet image classification + YOLO object detection, and how to build an `.rknn` (`kiln-convert`). |
 
 ## Integrate & operate
 
@@ -40,7 +42,7 @@ is **testing on a board other than the ROCK 4D** and reporting back.
 
 | doc | board |
 |---|---|
-| [RK3568.md](../RK3568.md) | RK3568 / Radxa ROCK 3B — vision-only, untested on hardware (help wanted). |
+| [RK3568.md](RK3568.md) | RK3568 / Radxa ROCK 3B — vision-only, untested on hardware (help wanted). |
 
 ## Internals (NPU bring-up)
 

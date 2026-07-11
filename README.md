@@ -1,5 +1,7 @@
 # Kiln — offline local AI (LLM + vision) on the RK3576 NPU
 
+**English** · [简体中文](README.zh-CN.md)
+
 **A private, offline AI assistant and image recognition on your Radxa ROCK 4D — one
 command to install.** Chat with a local LLM and classify or detect objects in images,
 all running on the board's **NPU** — nothing leaves the device, no cloud, no API keys.
@@ -38,7 +40,7 @@ are required (see *Why it needs kernel patches*).
   `kiln-convert` (on-board model conversion) and `kiln-doctor` (health check).
 - **Not for you** if you're staying on the vendor **6.1 BSP** kernel. Vision is mainly
   **image classification** (MobileNet); **object detection (YOLO)** works but is newer
-  and tested on fewer models — see [`VISION.md`](VISION.md).
+  and tested on fewer models — see [`docs/VISION.md`](docs/VISION.md).
 
 ## Status
 
@@ -114,7 +116,7 @@ reading one config (`/etc/kiln/config.ini`):
   `/model` / `/system` / `/history` persisted to the config. Type `/help`. See
   [`docs/CHAT.md`](docs/CHAT.md).
 - **`kiln-vision`** — the image-classification CLI (MobileNet / RKNN). See
-  [`VISION.md`](VISION.md).
+  [`docs/VISION.md`](docs/VISION.md).
 
 - **`kiln-config`** — a `whiptail` TUI front-end to the config (Status & diagnostics,
   LLM and vision settings, models), modelled on `armbian-config`. It edits `config.ini`
@@ -140,7 +142,7 @@ the Kiln mainline kernel, and **reboots itself twice (~10–15 min total)** to f
 setup and land in a ready system. **This is normal — don't cut power.** Onboard wifi
 is down between the reboots (expected); phase 2 runs offline, so it doesn't need it.
 When it's done you'll see a "Kiln installed" note at login (or run `kiln-doctor`).
-See [`ARMBIAN.md`](ARMBIAN.md).
+See [`docs/ARMBIAN.md`](docs/ARMBIAN.md).
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/gahingwoo/kiln/main/scripts/kiln-install.sh | bash
@@ -171,7 +173,7 @@ follow [`buildroot/README.md`](buildroot/README.md). Publish a built+validated i
 `scripts/release-image.sh`.
 
 **Kernel** — CI publishes the `.deb`s; build it yourself per
-[`MAINLINE-KERNEL.md`](MAINLINE-KERNEL.md). The module alone builds against any
+[`docs/MAINLINE-KERNEL.md`](docs/MAINLINE-KERNEL.md). The module alone builds against any
 patched 7.x tree: `make KDIR=/path/to/kernel/build` (after fetch + apply-shims).
 The NPU DT node (`kernel-patches/0004`) uses the **real** vendor RK3576 addresses,
 not the guessed open-driver layout.
@@ -191,7 +193,7 @@ adds / removes models, and `kiln-doctor` checks a model is present and version-m
 - **Vision** — `kiln-convert mobilenet` builds a classifier `.rknn` on the board (or
   `kiln-convert yolov8n` a YOLO detector, or your own ONNX); it pins `rknn-toolkit2` to
   the `librknnrt` **2.3.x** runtime. You can also convert on an x86 host and drop the
-  `.rknn` in `/opt/models`. See [`VISION.md`](VISION.md).
+  `.rknn` in `/opt/models`. See [`docs/VISION.md`](docs/VISION.md).
 
 ## Layout
 
@@ -200,7 +202,7 @@ adds / removes models, and `kiln-doctor` checks a model is present and version-m
   with a rationale README), `compat/` (BSP-only `soc/rockchip/*` stubs)
 - `Kbuild`, `Makefile`, `dkms.conf` — out-of-tree module build (DRM_GEM; DKMS)
 - `kernel-patches/` — RK3576 NPU pmdomain/iommu/DT patches (mainline build);
-  `kernel-patches-rk3568/` — RK3568 / ROCK 3B (untested; see [`RK3568.md`](RK3568.md))
+  `kernel-patches-rk3568/` — RK3568 / ROCK 3B (untested; see [`docs/RK3568.md`](docs/RK3568.md))
 - `buildroot/board/rock4d/` — tool sources: `kiln_config.h`, `kiln_llm.h` /
   `kiln_vision.h` (runtime wrappers), `kiln_serve.cpp`, `rkllm_chat.cpp`,
   `rknn_mobilenet.cpp`

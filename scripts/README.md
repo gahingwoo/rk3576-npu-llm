@@ -1,7 +1,7 @@
 # scripts/
 
 The Kiln CLIs and installer. End-user usage lives in the root
-[`README.md`](../README.md) / [`ARMBIAN.md`](../ARMBIAN.md); this is a map.
+[`README.md`](../README.md) / [`ARMBIAN.md`](../docs/ARMBIAN.md); this is a map.
 
 | file | what it is |
 |---|---|

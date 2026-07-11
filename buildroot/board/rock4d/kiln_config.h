@@ -53,7 +53,7 @@ struct KilnConfig {
     std::string vision_core_mask = "auto";  // auto | 0 | 1 | 0_1   (RK3576 has 2 NPU cores)
     std::string vision_priority  = "high";  // high | medium | low
     // detection knobs -- only used when task = detect (EXPERIMENTAL YOLOv8/11; the
-    // default classify path ignores them). See kiln_detect.h / VISION.md.
+    // default classify path ignores them). See kiln_detect.h / docs/VISION.md.
     std::string vision_task      = "classify"; // classify | detect
     std::string vision_detector  = "auto";     // auto | yolov8 | yolov5 | yolox
     float       vision_conf      = 0.25f;      // detection score threshold

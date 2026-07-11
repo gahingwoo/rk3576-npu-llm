@@ -59,7 +59,7 @@ These are non-negotiable because they're what makes the project trustworthy:
 - **Kernel / NPU-bring-up** changes: see [`kernel-patches/README.md`](kernel-patches/README.md)
   and [`driver/patches/README.md`](driver/patches/README.md).
 - **New board support**: needs that board's DTB with the NPU node + the `vdd_npu`
-  regulator fix, plus SoC detection in `kiln-install.sh`. See [`RK3568.md`](RK3568.md)
+  regulator fix, plus SoC detection in `kiln-install.sh`. See [`docs/RK3568.md`](docs/RK3568.md)
   for the pattern.
 
 ## License

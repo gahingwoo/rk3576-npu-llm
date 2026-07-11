@@ -123,7 +123,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG=kiln-mainline-kernel
-          NOTES="mainline linux-${KVER} for Radxa ROCK 4D (RK3576) + Kiln NPU patches 0001-0010 (pmdomain cold-start arm + settle/BIU, iommu clocks/stall, vendor rknpu DT node, and 0010 vdd_npu_s0 always-on -- the fix that makes repeat inference work; 9.3 tok/s). bindeb-pkg. Install per MAINLINE-KERNEL.md / kiln-install.sh."
+          NOTES="mainline linux-${KVER} for Radxa ROCK 4D (RK3576) + Kiln NPU patches 0001-0010 (pmdomain cold-start arm + settle/BIU, iommu clocks/stall, vendor rknpu DT node, and 0010 vdd_npu_s0 always-on -- the fix that makes repeat inference work; 9.3 tok/s). bindeb-pkg. Install per docs/MAINLINE-KERNEL.md / kiln-install.sh."
           if gh release view "$TAG" >/dev/null 2>&1; then
             # clear stale assets first so the installer never picks an old build
             gh release view "$TAG" --json assets --jq '.assets[].name' \

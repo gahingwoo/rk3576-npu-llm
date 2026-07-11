@@ -57,7 +57,7 @@ into the `.rkllm` at conversion — not settable.
 | `top_n` | how many classes to print/return |
 | `core_mask` | NPU cores: `auto` \| `0` \| `1` \| `0_1` (RK3576 has 2 cores) |
 | `priority` | RKNN scheduling priority: `high` \| `medium` \| `low` |
-| `task` | `classify` (default, MobileNet) or `detect` (YOLO). Detection is verified on-board (YOLOv8n) but newer/tested on fewer models; export with **NMS off**. `kiln-convert yolov8n` builds one. See [`../VISION.md`](../VISION.md) |
+| `task` | `classify` (default, MobileNet) or `detect` (YOLO). Detection is verified on-board (YOLOv8n) but newer/tested on fewer models; export with **NMS off**. `kiln-convert yolov8n` builds one. See [`VISION.md`](VISION.md) |
 | `detector` | detect family: `auto` \| `yolov8` \| `yolov5` \| `yolox` \| `yoloraw` (pre-NMS `[1,N,4+ncls]`, e.g. YOLO26/v10 `nms=False`) \| `end2end` (NMS-in-model — crashes the NPU, avoid); used only when `task=detect` |
 | `conf_threshold`, `nms_iou` | detection score / NMS-IoU thresholds (used only when `task=detect`) |
 

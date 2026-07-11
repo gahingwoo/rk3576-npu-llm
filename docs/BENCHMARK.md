@@ -60,7 +60,7 @@ kiln-vision /opt/models/dog_bike_car.jpg out.jpg   # prints boxes + saves an ann
 - Classification at ~169 fps and an LLM at 9–13 tok/s on a ~$40-class board, fully
   offline, is the headline: a private assistant + real-time-ish vision on the edge.
 - Detection is newer and tested on fewer models than classification — treat a new model
-  as "confirm it once" (see [VISION.md](../VISION.md)).
+  as "confirm it once" (see [VISION.md](VISION.md)).
 
 Have numbers from a different model or (especially) a **different board**? A
 `kiln-doctor` paste + your `[bench]` lines in an

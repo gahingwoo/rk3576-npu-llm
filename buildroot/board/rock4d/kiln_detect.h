@@ -23,7 +23,7 @@
 // reads floats (want_float=1) for correctness+simplicity -- the model's sigmoids are
 // baked into the airockchip export, so values arrive activated. The int8-gating speed
 // optimization is left as a future step. Models are user-supplied; Kiln bundles none
-// (Ultralytics YOLOv5/8/11 are AGPL-3.0; YOLOX is Apache-2.0 -- see VISION.md).
+// (Ultralytics YOLOv5/8/11 are AGPL-3.0; YOLOX is Apache-2.0 -- see docs/VISION.md).
 //
 // The ONE translation unit needing stb's decoder must `#define STB_IMAGE_IMPLEMENTATION`
 // before including this (kiln_vision.h says the same; the include is guarded so a TU

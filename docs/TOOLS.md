@@ -83,7 +83,7 @@ Conventions:
   (`high`/`medium`/`low`), `keep_history` (`1`/`0`), `detector` family.
 - **Vision does classify (default) or detect (YOLO).** Switching to `task = detect`
   offers to point labels at COCO-80 and notes the export/licensing rules (NMS-off
-  export, Ultralytics AGPL vs YOLOX Apache); see [`../VISION.md`](../VISION.md). No
+  export, Ultralytics AGPL vs YOLOX Apache); see [`VISION.md`](VISION.md). No
   detector on disk? **Models → Get/convert** builds a YOLOv8n for you.
 - Most changes apply the **next time** you start `kiln-chat` / `kiln-vision` /
   `kiln-serve`; System driver actions may need a reload or reboot (stated per action).
@@ -111,7 +111,7 @@ Source can be a **model-zoo shortcut** (`mobilenet` / `yolov8n`, fetched from
 normalization (`mobilenet`: ImageNet mean/std; `yolo`: `0..255`); override with
 `--type` / `--mean` / `--std`. Default is fp16; `--quant --dataset FILE` does INT8 with
 a calibration list. `--set-active` writes the model (and, for YOLO, `task = detect` +
-COCO labels) into the config. See `kiln-convert --help` and [`../VISION.md`](../VISION.md).
+COCO labels) into the config. See `kiln-convert --help` and [`VISION.md`](VISION.md).
 
 > **Licensing.** Kiln bundles no models. `mobilenet` is Apache-2.0 (clean). `yolov8n`
 > pulls Ultralytics weights, which are **AGPL-3.0** — `kiln-convert` shows a notice and
