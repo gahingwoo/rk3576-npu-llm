@@ -1,5 +1,18 @@
 # capture/ — NPU per-op capture + the "cold-start arm" breakthrough probe
 
+> **STATUS 2026-07-13 — the breakthrough probe was RUN, all-negative; do NOT re-chase it
+> as an open lead.** `env-trace.sh` (regmap env), the `wtrace` direct-writel diff, the
+> driver submit-register diff, a real per-submit TLB ZAP, and a CPU-cache-coherency check
+> were all executed vendor-vs-rocket on this one 7.1.3 kernel — every one came back
+> identical / ruled-out. Decisively, `replay_rocket` replaying the vendor's EXACT captured
+> regcmd bytes through rocket STILL walls, so no payload/regcmd diff (`extract_regcmd.py`)
+> can explain it either. Both GRF suspects are closed: memory-repair GRF REFUTED (this
+> vendor stack never writes it yet MACs correctly), read-margin GRF board-tested null.
+> Net: the closed-vs-open dimension is EXHAUSTED and it HARDENS the "arm is internal
+> cold-start sequencer state (RTL)" reading. The authoritative write-up is
+> `FINDINGS-DUAL-IMAGE.md` in the linux-rk3576-npu repo. The tools below remain useful as
+> a general bring-up capture/diff toolkit — just not as a live wall-breaking lead.
+
 A small capture toolkit for RK3576/RK3568 NPU bring-up. Two jobs:
 
 1. **Per-op capture** (`run-capture.sh`) — dump one inference's register-command
